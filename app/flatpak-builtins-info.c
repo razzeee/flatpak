@@ -563,23 +563,6 @@ flatpak_complete_info (FlatpakCompletion *completion)
           flatpak_complete_ref_id (completion, refs);
         }
       break;
-
-    case 2: /* BRANCH */
-      for (i = 0; i < dirs->len; i++)
-        {
-          FlatpakDir *dir = g_ptr_array_index (dirs, i);
-          g_autoptr(GPtrArray) refs = flatpak_dir_find_installed_refs (dir, completion->argv[1], NULL, opt_arch,
-                                                                       kinds, FIND_MATCHING_REFS_FLAGS_NONE, &error);
-          if (refs == NULL)
-            flatpak_completion_debug ("find remote refs error: %s", error->message);
-
-          flatpak_complete_ref_branch (completion, refs);
-        }
-
-      break;
-
-    default:
-      break;
     }
 
   return TRUE;
