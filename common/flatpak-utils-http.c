@@ -647,19 +647,54 @@ flatpak_download_http_uri_once (FlatpakHttpSession    *session,
 
   g_info ("Loading %s using curl", uri);
 
-  curl_easy_setopt (curl, CURLOPT_URL, uri);
-  curl_easy_setopt (curl, CURLOPT_WRITEDATA, (void *)data);
-  curl_easy_setopt (curl, CURLOPT_HEADERDATA, (void *)data);
+  res = curl_easy_setopt (curl, CURLOPT_URL, uri);
+  if (res != CURLE_OK)
+    {
+      set_error_from_curl (error, uri, res, data->cancellable);
+      return FALSE;
+    }
+
+  res = curl_easy_setopt (curl, CURLOPT_WRITEDATA, (void *)data);
+  if (res != CURLE_OK)
+    {
+      set_error_from_curl (error, uri, res, data->cancellable);
+      return FALSE;
+    }
+
+  res = curl_easy_setopt (curl, CURLOPT_HEADERDATA, (void *)data);
+  if (res != CURLE_OK)
+    {
+      set_error_from_curl (error, uri, res, data->cancellable);
+      return FALSE;
+    }
 
   if (data->certificates)
     {
       if (data->certificates->ca_cert_file)
-        curl_easy_setopt (curl, CURLOPT_CAINFO, data->certificates->ca_cert_file);
+        {
+          res = curl_easy_setopt (curl, CURLOPT_CAINFO, data->certificates->ca_cert_file);
+          if (res != CURLE_OK)
+            {
+              set_error_from_curl (error, uri, res, data->cancellable);
+              return FALSE;
+            }
+        }
 
       if (data->certificates->client_cert_file)
         {
-          curl_easy_setopt (curl, CURLOPT_SSLCERT, data->certificates->client_cert_file);
-          curl_easy_setopt (curl, CURLOPT_SSLKEY, data->certificates->client_key_file);
+          res = curl_easy_setopt (curl, CURLOPT_SSLCERT, data->certificates->client_cert_file);
+          if (res != CURLE_OK)
+            {
+              set_error_from_curl (error, uri, res, data->cancellable);
+              return FALSE;
+            }
+
+          res = curl_easy_setopt (curl, CURLOPT_SSLKEY, data->certificates->client_key_file);
+          if (res != CURLE_OK)
+            {
+              set_error_from_curl (error, uri, res, data->cancellable);
+              return FALSE;
+            }
         }
     }
 
