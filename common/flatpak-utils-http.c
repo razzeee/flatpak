@@ -590,7 +590,11 @@ void
 flatpak_http_session_free (FlatpakHttpSession* session)
 {
   g_mutex_lock (&session->lock);
-  curl_easy_cleanup (session->curl);
+  if (session->curl)
+    {
+      curl_easy_cleanup (session->curl);
+      session->curl = NULL;
+    }
   g_mutex_unlock (&session->lock);
   g_mutex_clear (&session->lock);
   g_free (session);
