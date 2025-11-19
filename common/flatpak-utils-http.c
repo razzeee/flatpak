@@ -570,8 +570,10 @@ flatpak_create_http_session (const char *user_agent)
   g_assert_cmpint (rc, ==, CURLE_OK);
 #endif
 
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _write_cb);
-  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, _header_cb);
+  rc = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _write_cb);
+  g_assert_cmpint (rc, ==, CURLE_OK);
+  rc = curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, _header_cb);
+  g_assert_cmpint (rc, ==, CURLE_OK);
 
   /* Abort the connection if connecting to the server takes too long. This
    * timeout has no effect after a connection is established. */
