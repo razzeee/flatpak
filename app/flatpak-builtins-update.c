@@ -86,6 +86,7 @@ flatpak_builtin_update (int           argc,
   FlatpakKinds kinds;
   g_autoptr(GPtrArray) transactions = NULL;
   gboolean has_updates;
+  gboolean any_error = FALSE;
 
   context = g_option_context_new (_("[REF…] - Update applications or runtimes"));
   g_option_context_set_translation_domain (context, GETTEXT_PACKAGE);
@@ -212,6 +213,7 @@ flatpak_builtin_update (int           argc,
 
               if (g_error_matches (*error, FLATPAK_ERROR, FLATPAK_ERROR_REMOTE_NOT_FOUND))
                 {
+                  any_error = TRUE;
                   g_printerr (_("Unable to update %s: %s\n"), flatpak_decomposed_get_ref (ref), (*error)->message);
                   g_clear_error (error);
                 }
@@ -259,8 +261,12 @@ flatpak_builtin_update (int           argc,
       if (!flatpak_transaction_run (transaction, cancellable, error))
         {
           if (g_error_matches (*error, FLATPAK_ERROR, FLATPAK_ERROR_ABORTED))
-            g_clear_error (error);  /* Don't report on stderr */
+            {
+              g_clear_error (error);  /* Don't report on stderr */
+              return TRUE;
+            }
 
+          any_error = TRUE;
           return FALSE;
         }
 
@@ -280,7 +286,7 @@ flatpak_builtin_update (int           argc,
         return FALSE;
     }
 
-  return TRUE;
+  return !any_error;
 }
 
 gboolean
