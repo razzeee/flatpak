@@ -93,6 +93,7 @@ sources = [
   'flatpak-builtins-list.c',
   'flatpak-builtins-make-current.c',
   'flatpak-builtins-mask.c',
+  'flatpak-builtins-move.c',
   'flatpak-builtins-override.c',
   'flatpak-builtins-permission-list.c',
   'flatpak-builtins-permission-remove.c',
