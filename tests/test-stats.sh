@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-. $(dirname $0)/libtest.sh
+. "$(dirname "$0")"/libtest.sh
 
 # Setup
 setup_repo
@@ -37,8 +37,8 @@ echo "1..3"
 # 1. Check flatpak stats
 ${FLATPAK} stats ${U} > stats_out
 assert_file_has_content stats_out "Total size on disk:"
-assert_file_has_content stats_out "Exclusive space:"
-assert_file_has_content stats_out "Shared space:"
+assert_file_has_content stats_out "Exclusive size:"
+assert_file_has_content stats_out "Shared size:"
 ok "stats command"
 
 # 2. Check flatpak list --columns
