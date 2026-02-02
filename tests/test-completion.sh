@@ -87,6 +87,7 @@ ${FLATPAK} complete "flatpak list --" 15 "--" | sort > complete_out
 --app-runtime=
 --arch=
 --columns=
+--exclusive
 --help 
 --installation=
 --json 
@@ -168,7 +169,7 @@ ok "complete NO_DIR commands"
 for cmd in history info list run update mask \
            config install make-current override remote-add repair \
            create-usb remote-delete remote-info remote-list remote-ls \
-           remote-modify search uninstall update; do
+           remote-modify search uninstall update stats; do
   len=$(awk '{ print length($0) }' <<< "flatpak $cmd --")
   ${FLATPAK} complete "flatpak $cmd --" $len "--"  > complete_out
   assert_file_has_content complete_out "^--system "
@@ -186,6 +187,7 @@ application
 arch
 branch
 description
+exclusive
 help
 installation
 latest
@@ -201,7 +203,7 @@ EOF
 ok "complete list --columns="
 
 ${FLATPAK} complete "flatpak list --columns=all" 27 "--columns=all" | sort > complete_out
-assert_file_empty complete-out
+assert_file_empty complete_out
 
 ok "complete list --columns=all"
 
@@ -218,6 +220,7 @@ arch,active
 arch,application
 arch,branch
 arch,description
+arch,exclusive
 arch,installation
 arch,latest
 arch,name

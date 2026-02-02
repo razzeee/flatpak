@@ -273,6 +273,13 @@ flatpak_ostree_object_name_serialize (FlatpakOstreeObjectName *name,
   (*name)[32] = (guint8) objtype;
 }
 
+static void
+safe_hash_table_unref (gpointer p)
+{
+  if (p)
+    g_hash_table_unref ((GHashTable *) p);
+}
+
 static guint
 flatpak_ostree_object_name_hash (gconstpointer a)
 {
@@ -18149,7 +18156,7 @@ flatpak_dir_get_ref_sizes (FlatpakDir *self, GCancellable *cancellable, GError *
   g_autoptr(GPtrArray) refs = flatpak_dir_list_refs (self, FLATPAK_KINDS_APP | FLATPAK_KINDS_RUNTIME, cancellable, error);
   if (refs == NULL) return NULL;
 
-  g_autoptr(GPtrArray) ref_objects_list = g_ptr_array_new_with_free_func ((GDestroyNotify)g_hash_table_unref);
+  g_autoptr(GPtrArray) ref_objects_list = g_ptr_array_new_with_free_func ((GDestroyNotify)safe_hash_table_unref);
 
   for (guint i = 0; i < refs->len; i++)
     {
@@ -18166,7 +18173,7 @@ flatpak_dir_get_ref_sizes (FlatpakDir *self, GCancellable *cancellable, GError *
       g_ptr_array_add (ref_objects_list, ref_objects);
 
       GHashTableIter iter;
-      gpointer key;
+      gpointer key = NULL;
       g_hash_table_iter_init (&iter, ref_objects);
       while (g_hash_table_iter_next (&iter, &key, NULL))
         {
@@ -18198,7 +18205,7 @@ flatpak_dir_get_ref_sizes (FlatpakDir *self, GCancellable *cancellable, GError *
 
       FlatpakRefSizes *sizes = g_new0 (FlatpakRefSizes, 1);
       GHashTableIter iter;
-      gpointer key;
+      gpointer key = NULL;
       g_hash_table_iter_init (&iter, ref_objects);
       while (g_hash_table_iter_next (&iter, &key, NULL))
         {
@@ -18238,7 +18245,7 @@ flatpak_dir_get_stats (FlatpakDir *self, FlatpakDirStats *out_stats, GCancellabl
       if (ref_objects == NULL) return FALSE;
 
       GHashTableIter iter;
-      gpointer key;
+      gpointer key = NULL;
       g_hash_table_iter_init (&iter, ref_objects);
       while (g_hash_table_iter_next (&iter, &key, NULL))
         {
@@ -18260,9 +18267,9 @@ flatpak_dir_get_stats (FlatpakDir *self, FlatpakDirStats *out_stats, GCancellabl
     }
 
   GHashTableIter obj_iter;
-  gpointer obj_key, obj_value;
+  gpointer obj_key = NULL, obj_value = NULL;
   g_hash_table_iter_init (&obj_iter, object_info);
-  while (g_hash_table_iter_next (&obj_iter, &obj_key, obj_value))
+  while (g_hash_table_iter_next (&obj_iter, &obj_key, &obj_value))
     {
       ObjectInfo *info = obj_value;
       if (info->ref_count == 1)
