@@ -18151,6 +18151,9 @@ get_objects_for_commit (OstreeRepo *repo, const char *checksum, GCancellable *ca
 GHashTable *
 flatpak_dir_get_ref_sizes (FlatpakDir *self, GCancellable *cancellable, GError **error)
 {
+  if (!flatpak_dir_maybe_ensure_repo (self, cancellable, error))
+    return NULL;
+
   OstreeRepo *repo = flatpak_dir_get_repo (self);
   g_autoptr(GHashTable) object_info = g_hash_table_new_full (flatpak_ostree_object_name_hash, flatpak_ostree_object_name_equal, g_free, g_free);
   g_autoptr(GPtrArray) refs = flatpak_dir_list_refs (self, FLATPAK_KINDS_APP | FLATPAK_KINDS_RUNTIME, cancellable, error);
@@ -18223,6 +18226,9 @@ flatpak_dir_get_ref_sizes (FlatpakDir *self, GCancellable *cancellable, GError *
 gboolean
 flatpak_dir_get_stats (FlatpakDir *self, FlatpakDirStats *out_stats, GCancellable *cancellable, GError **error)
 {
+  if (!flatpak_dir_maybe_ensure_repo (self, cancellable, error))
+    return FALSE;
+
   OstreeRepo *repo = flatpak_dir_get_repo (self);
   g_autoptr(GHashTable) object_info = g_hash_table_new_full (flatpak_ostree_object_name_hash, flatpak_ostree_object_name_equal, g_free, g_free);
   g_autoptr(GPtrArray) refs = flatpak_dir_list_refs (self, FLATPAK_KINDS_APP | FLATPAK_KINDS_RUNTIME, cancellable, error);

@@ -87,7 +87,6 @@ ${FLATPAK} complete "flatpak list --" 15 "--" | sort > complete_out
 --app-runtime=
 --arch=
 --columns=
---exclusive
 --help 
 --installation=
 --json 
