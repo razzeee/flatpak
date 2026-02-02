@@ -436,6 +436,38 @@ _header_cb (char *buffer,
   return realsize;
 }
 
+#if CURL_AT_LEAST_VERSION(7, 32, 0)
+static int
+_xferinfo_cb (void *clientp,
+              curl_off_t dltotal,
+              curl_off_t dlnow,
+              curl_off_t ultotal,
+              curl_off_t ulnow)
+{
+  LoadUriData *data = (LoadUriData *)clientp;
+
+  if (g_cancellable_is_cancelled (data->cancellable))
+    return 1; /* Non-zero return value aborts the transfer */
+
+  return 0;
+}
+#else
+static int
+_progress_cb (void *clientp,
+              double dltotal,
+              double dlnow,
+              double ultotal,
+              double ulnow)
+{
+  LoadUriData *data = (LoadUriData *)clientp;
+
+  if (g_cancellable_is_cancelled (data->cancellable))
+    return 1; /* Non-zero return value aborts the transfer */
+
+  return 0;
+}
+#endif
+
 static size_t
 _write_cb (void *content_data,
            size_t size,
@@ -626,6 +658,14 @@ flatpak_download_http_uri_once (FlatpakHttpSession    *session,
   curl_easy_setopt (curl, CURLOPT_URL, uri);
   curl_easy_setopt (curl, CURLOPT_WRITEDATA, (void *)data);
   curl_easy_setopt (curl, CURLOPT_HEADERDATA, (void *)data);
+#if CURL_AT_LEAST_VERSION(7, 32, 0)
+  curl_easy_setopt (curl, CURLOPT_XFERINFOFUNCTION, _xferinfo_cb);
+  curl_easy_setopt (curl, CURLOPT_XFERINFODATA, (void *)data);
+#else
+  curl_easy_setopt (curl, CURLOPT_PROGRESSFUNCTION, _progress_cb);
+  curl_easy_setopt (curl, CURLOPT_PROGRESSDATA, (void *)data);
+#endif
+  curl_easy_setopt (curl, CURLOPT_NOPROGRESS, 0L);
 
   if (data->certificates)
     {

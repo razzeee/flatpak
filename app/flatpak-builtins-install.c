@@ -588,7 +588,7 @@ flatpak_builtin_install (int argc, char **argv, GCancellable *cancellable, GErro
           g_autoptr(FlatpakRemoteState) state = NULL;
 
           state = flatpak_transaction_ensure_remote_state (transaction, FLATPAK_TRANSACTION_OPERATION_INSTALL,
-                                                           remote, arch, error);
+                                                           remote, arch, cancellable, error);
           if (state == NULL)
             return FALSE;
 

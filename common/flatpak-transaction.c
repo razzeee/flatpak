@@ -2097,6 +2097,7 @@ flatpak_transaction_ensure_remote_state (FlatpakTransaction             *self,
                                          FlatpakTransactionOperationType kind,
                                          const char                     *remote,
                                          const char                     *opt_arch,
+                                         GCancellable                   *cancellable,
                                          GError                        **error)
 {
   FlatpakTransactionPrivate *priv = flatpak_transaction_get_instance_private (self);
@@ -2242,6 +2243,7 @@ static gboolean
 op_get_related (FlatpakTransaction           *self,
                 FlatpakTransactionOperation  *op,
                 GPtrArray                   **out_related,
+                GCancellable                *cancellable,
                 GError                      **error)
 {
   FlatpakTransactionPrivate *priv = flatpak_transaction_get_instance_private (self);
@@ -2251,7 +2253,7 @@ op_get_related (FlatpakTransaction           *self,
 
   if (op->kind != FLATPAK_TRANSACTION_OPERATION_UNINSTALL)
     {
-      state = flatpak_transaction_ensure_remote_state (self, op->kind, op->remote, NULL, error);
+      state = flatpak_transaction_ensure_remote_state (self, op->kind, op->remote, NULL, cancellable, error);
       if (state == NULL)
         return FALSE;
     }
@@ -2266,10 +2268,10 @@ op_get_related (FlatpakTransaction           *self,
     related = flatpak_dir_find_local_related_for_metadata (priv->dir, op->ref,
                                                            NULL, /* remote could differ from op->remote */
                                                            op->resolved_metakey,
-                                                           NULL, &related_error);
+                                                           cancellable, &related_error);
   else
     related = flatpak_dir_find_remote_related_for_metadata (priv->dir, state, op->ref,
-                                                            op->resolved_metakey, NULL, &related_error);
+                                                            op->resolved_metakey, cancellable, &related_error);
 
   if (related_error != NULL)
     g_message (_("Warning: Problem looking for related refs: %s"), related_error->message);
@@ -2283,6 +2285,7 @@ op_get_related (FlatpakTransaction           *self,
 static gboolean
 add_related (FlatpakTransaction          *self,
              FlatpakTransactionOperation *op,
+             GCancellable                *cancellable,
              GError                     **error)
 {
   FlatpakTransactionPrivate *priv = flatpak_transaction_get_instance_private (self);
@@ -2292,7 +2295,7 @@ add_related (FlatpakTransaction          *self,
   if (priv->disable_related)
     return TRUE;
 
-  if (!op_get_related (self, op, &related, error))
+  if (!op_get_related (self, op, &related, cancellable, error))
     return FALSE;
 
   if (related == NULL)
@@ -2409,7 +2412,7 @@ search_for_dependency (FlatpakTransaction  *self,
       g_autoptr(GError) local_error = NULL;
       g_autoptr(FlatpakRemoteState) state = NULL;
 
-      state = flatpak_transaction_ensure_remote_state (self, FLATPAK_TRANSACTION_OPERATION_INSTALL, remote, arch, &local_error);
+      state = flatpak_transaction_ensure_remote_state (self, FLATPAK_TRANSACTION_OPERATION_INSTALL, remote, arch, cancellable, &local_error);
       if (state == NULL)
         {
           g_info ("Can't get state for remote %s, ignoring: %s", remote, local_error->message);
@@ -2483,9 +2486,9 @@ find_runtime_remote (FlatpakTransaction             *self,
 
   /* Here we are passing along app_remote so it gets priority */
   if (transaction_is_local_only (self, source_kind))
-    found_remotes = search_for_local_dependency (self, all_remotes, runtime_ref, NULL, NULL);
+    found_remotes = search_for_local_dependency (self, all_remotes, runtime_ref, cancellable, NULL);
   else
-    found_remotes = search_for_dependency (self, all_remotes, runtime_ref, NULL, NULL);
+    found_remotes = search_for_dependency (self, all_remotes, runtime_ref, cancellable, NULL);
 
   if (found_remotes == NULL || *found_remotes == NULL)
     {
@@ -2564,6 +2567,7 @@ add_new_dep_op (FlatpakTransaction           *self,
                 FlatpakTransactionOperation  *op,
                 FlatpakDecomposed            *dep_ref,
                 FlatpakTransactionOperation **dep_op,
+                GCancellable                *cancellable,
                 GError                      **error)
 {
   FlatpakTransactionPrivate *priv = flatpak_transaction_get_instance_private (self);
@@ -2573,7 +2577,7 @@ add_new_dep_op (FlatpakTransaction           *self,
     {
       g_info ("Installing dependency %s of %s", flatpak_decomposed_get_pref (dep_ref),
               flatpak_decomposed_get_pref (op->ref));
-      dep_remote = find_runtime_remote (self, op->ref, op->remote, dep_ref, op->kind, NULL, error);
+      dep_remote = find_runtime_remote (self, op->ref, op->remote, dep_ref, op->kind, cancellable, error);
       if (dep_remote == NULL)
         return FALSE;
 
@@ -2599,6 +2603,7 @@ add_new_dep_op (FlatpakTransaction           *self,
 static gboolean
 add_deps (FlatpakTransaction          *self,
           FlatpakTransactionOperation *op,
+          GCancellable                *cancellable,
           GError                     **error)
 {
   FlatpakTransactionPrivate *priv = flatpak_transaction_get_instance_private (self);
@@ -2629,7 +2634,7 @@ add_deps (FlatpakTransaction          *self,
 
   if (runtime_op == NULL)
     {
-      if (!add_new_dep_op (self, op, runtime_ref, &runtime_op, error))
+      if (!add_new_dep_op (self, op, runtime_ref, &runtime_op, cancellable, error))
         return FALSE;
     }
 
@@ -2656,7 +2661,7 @@ add_deps (FlatpakTransaction          *self,
           FlatpakTransactionOperation *sdk_op = flatpak_transaction_get_last_op_for_ref (self, sdk_ref);
           if (sdk_op == NULL)
             {
-              if (!add_new_dep_op (self, op, sdk_ref, &sdk_op, error))
+              if (!add_new_dep_op (self, op, sdk_ref, &sdk_op, cancellable, error))
                 return FALSE;
             }
 
@@ -2802,7 +2807,7 @@ flatpak_transaction_add_ref (FlatpakTransaction             *self,
     {
       g_autofree char *arch = flatpak_decomposed_dup_arch (ref);
 
-      state = flatpak_transaction_ensure_remote_state (self, kind, remote, arch, error);
+      state = flatpak_transaction_ensure_remote_state (self, kind, remote, arch, NULL, error);
       if (state == NULL)
         return FALSE;
     }
@@ -3203,6 +3208,7 @@ flatpak_transaction_add_sync_preinstalled (FlatpakTransaction *self,
                                                            FLATPAK_TRANSACTION_OPERATION_INSTALL,
                                                            remote,
                                                            priv->default_arch,
+                                                           NULL,
                                                            &local_error);
           if (state == NULL)
             {
@@ -3374,8 +3380,11 @@ flatpak_transaction_update_metadata (FlatpakTransaction *self,
     {
       char *remote = remotes[i];
       gboolean updated = FALSE;
+
+      if (g_cancellable_set_error_if_cancelled (cancellable, error))
+        return FALSE;
       g_autoptr(GError) my_error = NULL;
-      g_autoptr(FlatpakRemoteState) state = flatpak_transaction_ensure_remote_state (self, FLATPAK_TRANSACTION_OPERATION_UPDATE, remote, NULL, NULL);
+      g_autoptr(FlatpakRemoteState) state = flatpak_transaction_ensure_remote_state (self, FLATPAK_TRANSACTION_OPERATION_UPDATE, remote, NULL, cancellable, NULL);
 
       g_info ("Looking for remote metadata updates for %s", remote);
       if (!flatpak_dir_update_remote_configuration (priv->dir, remote, state, &updated, cancellable, &my_error))
@@ -3424,6 +3433,9 @@ flatpak_transaction_add_auto_install (FlatpakTransaction *self,
       char *remote = remotes[i];
       g_autoptr(FlatpakDecomposed) auto_install_ref = NULL;
 
+      if (g_cancellable_set_error_if_cancelled (cancellable, error))
+        return FALSE;
+
       if (flatpak_dir_get_remote_disabled (priv->dir, remote))
         continue;
 
@@ -3436,7 +3448,7 @@ flatpak_transaction_add_auto_install (FlatpakTransaction *self,
           deploy = flatpak_dir_get_if_deployed (priv->dir, auto_install_ref, NULL, cancellable);
           if (deploy == NULL)
             {
-              g_autoptr(FlatpakRemoteState) state = flatpak_transaction_ensure_remote_state (self, FLATPAK_TRANSACTION_OPERATION_UPDATE, remote, NULL, NULL);
+              g_autoptr(FlatpakRemoteState) state = flatpak_transaction_ensure_remote_state (self, FLATPAK_TRANSACTION_OPERATION_UPDATE, remote, NULL, cancellable, NULL);
 
               if (state != NULL &&
                   flatpak_remote_state_lookup_ref (state, flatpak_decomposed_get_ref (auto_install_ref), NULL, NULL, NULL, NULL, NULL, NULL))
@@ -3756,6 +3768,9 @@ resolve_ops (FlatpakTransaction *self,
       g_autofree char *checksum = NULL;
       g_autoptr(GBytes) metadata_bytes = NULL;
 
+      if (g_cancellable_set_error_if_cancelled (cancellable, error))
+        return FALSE;
+
       if (op->resolved)
         continue;
 
@@ -3810,7 +3825,7 @@ resolve_ops (FlatpakTransaction *self,
             priv->max_op = MAX (priv->max_op, RUNTIME_INSTALL);
         }
 
-      state = flatpak_transaction_ensure_remote_state (self, op->kind, op->remote, NULL, error);
+      state = flatpak_transaction_ensure_remote_state (self, op->kind, op->remote, NULL, cancellable, error);
       if (state == NULL)
         return FALSE;
 
@@ -4279,8 +4294,30 @@ request_tokens_for_remote (FlatpakTransaction *self,
                                         priv->parent_window, cancellable, error))
     return FALSE;
 
-  while (!data.done)
-    g_main_context_iteration (context, TRUE);
+  {
+    g_autoptr(GSource) cancellable_source = NULL;
+
+    if (cancellable)
+      {
+        cancellable_source = g_cancellable_source_new (cancellable);
+        g_source_set_callback (cancellable_source, (GSourceFunc) g_main_context_wakeup, context, NULL);
+        g_source_attach (cancellable_source, context);
+      }
+
+    while (!data.done)
+      {
+        if (g_cancellable_set_error_if_cancelled (cancellable, error))
+          {
+            g_autoptr(GError) local_error = NULL;
+            if (!flatpak_authenticator_request_call_close_sync (data.request, NULL, &local_error))
+              g_info ("Failed to close auth request: %s", local_error->message);
+            priv->active_request_id = 0;
+            priv->active_request = NULL;
+            return FALSE;
+          }
+        g_main_context_iteration (context, TRUE);
+      }
+  }
 
   g_assert (priv->active_request_id == 0); /* No outstanding requests */
   priv->active_request = NULL;
@@ -4375,6 +4412,9 @@ request_required_tokens (FlatpakTransaction *self,
     {
       FlatpakTransactionOperation *op = l->data;
       GList *old;
+
+      if (g_cancellable_set_error_if_cancelled (cancellable, error))
+        return FALSE;
 
       if (!flatpak_transaction_operation_get_requires_authentication (op))
         continue;
@@ -4844,6 +4884,9 @@ flatpak_transaction_resolve_flatpakrefs (FlatpakTransaction *self,
   for (l = priv->flatpakrefs; l != NULL; l = l->next)
     {
       GKeyFile *flatpakref = l->data;
+
+      if (g_cancellable_set_error_if_cancelled (cancellable, error))
+        return FALSE;
       g_autofree char *remote = NULL;
       g_autofree char *runtime_repo_url = NULL;
       g_autoptr(FlatpakDecomposed) ref = NULL;
@@ -4937,6 +4980,9 @@ flatpak_transaction_resolve_bundles (FlatpakTransaction *self,
   for (l = priv->bundles; l != NULL; l = l->next)
     {
       BundleData *data = l->data;
+
+      if (g_cancellable_set_error_if_cancelled (cancellable, error))
+        return FALSE;
       g_autofree char *remote = NULL;
       g_autofree char *commit = NULL;
       g_autofree char *metadata = NULL;
@@ -4978,6 +5024,9 @@ flatpak_transaction_resolve_images (FlatpakTransaction *self,
   for (l = priv->images; l != NULL; l = l->next)
     {
       ImageData *data = l->data;
+
+      if (g_cancellable_set_error_if_cancelled (cancellable, error))
+        return FALSE;
       g_autoptr(FlatpakImageSource) image_source = NULL;
       g_autofree char *remote = NULL;
       g_autoptr(FlatpakDecomposed) ref = NULL;
@@ -5450,6 +5499,9 @@ flatpak_transaction_real_run (FlatpakTransaction *self,
   gboolean ready_res = FALSE;
   int i;
 
+  if (g_cancellable_set_error_if_cancelled (cancellable, error))
+    return FALSE;
+
   if (!priv->can_run)
     return flatpak_fail (error, _("Transaction already executed"));
 
@@ -5513,7 +5565,7 @@ flatpak_transaction_real_run (FlatpakTransaction *self,
     {
       FlatpakTransactionOperation *op = l->data;
 
-      if (!op->skip && !add_deps (self, op, error))
+      if (!op->skip && !add_deps (self, op, cancellable, error))
         {
           g_assert (error == NULL || *error != NULL);
           return FALSE;
@@ -5532,7 +5584,7 @@ flatpak_transaction_real_run (FlatpakTransaction *self,
     {
       FlatpakTransactionOperation *op = l->data;
 
-      if (!op->skip && !add_related (self, op, error))
+      if (!op->skip && !add_related (self, op, cancellable, error))
         {
           g_assert (error == NULL || *error != NULL);
           return FALSE;
@@ -5584,6 +5636,12 @@ flatpak_transaction_real_run (FlatpakTransaction *self,
       FlatpakTransactionOperation *op = l->data;
       g_autoptr(GError) local_error = NULL;
       gboolean res = TRUE;
+
+      if (g_cancellable_set_error_if_cancelled (cancellable, error))
+        {
+          succeeded = FALSE;
+          break;
+        }
       const char *pref;
       g_autoptr(FlatpakRemoteState) state = NULL;
 
@@ -5606,7 +5664,7 @@ flatpak_transaction_real_run (FlatpakTransaction *self,
           res = FALSE;
         }
       else if (op->kind != FLATPAK_TRANSACTION_OPERATION_UNINSTALL &&
-               (state = flatpak_transaction_ensure_remote_state (self, op->kind, op->remote, NULL, &local_error)) == NULL)
+               (state = flatpak_transaction_ensure_remote_state (self, op->kind, op->remote, NULL, cancellable, &local_error)) == NULL)
         {
           res = FALSE;
         }
