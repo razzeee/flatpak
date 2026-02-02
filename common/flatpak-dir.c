@@ -204,6 +204,51 @@ static void flatpak_dir_log (FlatpakDir *self,
                              const char *format,
                              ...) G_GNUC_PRINTF (12, 13);
 
+#define _LOOSE_PATH_MAX (256)
+
+static inline void
+get_extra_commitmeta_path (const char *commit,
+                           char *path_buf,
+                           gsize path_buf_len)
+{
+  snprintf (path_buf, path_buf_len,
+            "objects/%c%c/%s.commitmeta2",
+            commit[0], commit[1], commit + 2);
+}
+
+static gboolean
+load_extra_commitmeta (OstreeRepo       *repo,
+                       const char       *commit,
+                       GVariant        **out_variant,
+                       GCancellable     *cancellable,
+                       GError          **error)
+{
+  char loose_path_buf[_LOOSE_PATH_MAX];
+  glnx_autofd int fd = -1;
+  g_autoptr(GVariant) ret_variant = NULL;
+  g_autoptr(GError) temp_error = NULL;
+
+  get_extra_commitmeta_path (commit, loose_path_buf, sizeof (loose_path_buf));
+
+  if (!glnx_openat_rdonly (ostree_repo_get_dfd (repo), loose_path_buf, FALSE, &fd, &temp_error) &&
+      !g_error_matches (temp_error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
+    {
+      g_propagate_error (error, temp_error);
+      return FALSE;
+    }
+
+  if (fd != -1)
+    {
+      g_autoptr(GBytes) content = glnx_fd_readall_bytes (fd, cancellable, error);
+      if (!content)
+        return FALSE;
+      ret_variant = g_variant_ref_sink (g_variant_new_from_bytes (G_VARIANT_TYPE ("a{sv}"), content, TRUE));
+    }
+
+  *out_variant = g_steal_pointer (&ret_variant);
+  return TRUE;
+}
+
 #define flatpak_dir_log(self, change, remote, ref, commit, old_commit, url, format, ...) \
   (flatpak_dir_log) (self, __FILE__, __LINE__, __FUNCTION__, \
                      NULL, change, remote, ref, commit, old_commit, url, format, __VA_ARGS__)
@@ -214,6 +259,39 @@ static GBytes *upgrade_deploy_data (GBytes             *deploy_data,
                                     OstreeRepo         *repo,
                                     GCancellable       *cancellable,
                                     GError            **error);
+
+#define FLATPAK_OSTREE_OBJECT_NAME_LEN (32 + 1)
+typedef guint8 FlatpakOstreeObjectName[FLATPAK_OSTREE_OBJECT_NAME_LEN];
+
+static void
+flatpak_ostree_object_name_serialize (FlatpakOstreeObjectName *name,
+                                      const char *checksum,
+                                      OstreeObjectType objtype)
+{
+  ostree_checksum_inplace_to_bytes (checksum, &(*name)[0]);
+  g_assert (objtype < 255);
+  (*name)[32] = (guint8) objtype;
+}
+
+static guint
+flatpak_ostree_object_name_hash (gconstpointer a)
+{
+  const FlatpakOstreeObjectName *name = a;
+  const guint8 *data = &(*name)[0];
+
+  return
+    ((guint32) data[32]) |
+    ((guint32) data[31]) << 8 |
+    ((guint32) data[30]) << 16 |
+    ((guint32) data[29]) << 24;
+}
+
+static gboolean
+flatpak_ostree_object_name_equal (gconstpointer a,
+                                  gconstpointer b)
+{
+  return memcmp (a, b, sizeof (FlatpakOstreeObjectName)) == 0;
+}
 
 typedef struct
 {
@@ -17916,4 +17994,285 @@ flatpak_dir_list_unused_refs (FlatpakDir            *self,
 
   g_ptr_array_add (refs, NULL);
   return (char **)g_ptr_array_free (g_steal_pointer (&refs), FALSE);
+}
+
+typedef struct {
+  guint64 dev;
+  guint64 ino;
+} InodeKey;
+
+static guint
+inode_key_hash (gconstpointer a)
+{
+  const InodeKey *key = a;
+  return g_int64_hash (&key->dev) ^ g_int64_hash (&key->ino);
+}
+
+static gboolean
+inode_key_equal (gconstpointer a, gconstpointer b)
+{
+  const InodeKey *key_a = a;
+  const InodeKey *key_b = b;
+  return key_a->dev == key_b->dev && key_a->ino == key_b->ino;
+}
+
+static gboolean
+recursive_dir_size (int dfd, GHashTable *visited_inodes, guint64 *total_size, GCancellable *cancellable, GError **error)
+{
+  g_auto(GLnxDirFdIterator) iter = {0};
+  struct dirent *dent;
+
+  if (!glnx_dirfd_iterator_init_at (dfd, ".", FALSE, &iter, error))
+    return FALSE;
+
+  while (glnx_dirfd_iterator_next_dent (&iter, &dent, cancellable, error) && dent != NULL)
+    {
+      struct stat st;
+      if (fstatat (iter.fd, dent->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0)
+        continue;
+
+      if (S_ISLNK (st.st_mode))
+        {
+          *total_size += st.st_size;
+          continue;
+        }
+
+      InodeKey *key = g_new (InodeKey, 1);
+      key->dev = (guint64)st.st_dev;
+      key->ino = (guint64)st.st_ino;
+      if (g_hash_table_contains (visited_inodes, key))
+        {
+          g_free (key);
+        }
+      else
+        {
+          g_hash_table_add (visited_inodes, key);
+          *total_size += (guint64)st.st_blocks * 512;
+        }
+
+      if (S_ISDIR (st.st_mode))
+        {
+          glnx_autofd int child_fd = glnx_opendirat_with_errno (iter.fd, dent->d_name, TRUE);
+          if (child_fd >= 0)
+            {
+              if (!recursive_dir_size (child_fd, visited_inodes, total_size, cancellable, error))
+                return FALSE;
+            }
+        }
+    }
+  return TRUE;
+}
+
+gboolean
+flatpak_dir_get_installation_size (FlatpakDir *self, guint64 *out_size, GCancellable *cancellable, GError **error)
+{
+  g_autoptr(GHashTable) visited_inodes = g_hash_table_new_full (inode_key_hash, inode_key_equal, g_free, NULL);
+  guint64 total_size = 0;
+  glnx_autofd int dfd = glnx_opendirat_with_errno (AT_FDCWD, flatpak_file_get_path_cached (self->basedir), TRUE);
+
+  if (dfd < 0)
+    {
+      if (errno == ENOENT)
+        {
+          *out_size = 0;
+          return TRUE;
+        }
+      return glnx_throw_errno (error);
+    }
+
+  if (!recursive_dir_size (dfd, visited_inodes, &total_size, cancellable, error))
+    return FALSE;
+
+  *out_size = total_size;
+  return TRUE;
+}
+
+typedef struct {
+  FlatpakOstreeObjectName name;
+  guint32 ref_count;
+  guint64 size;
+} ObjectInfo;
+
+static GHashTable *
+get_objects_for_commit (OstreeRepo *repo, const char *checksum, GCancellable *cancellable, GError **error)
+{
+  g_autoptr(GVariant) extra_commitmeta = NULL;
+  g_autoptr(GVariant) commit_reachable = NULL;
+  GHashTable *reachable_ht = g_hash_table_new_full (flatpak_ostree_object_name_hash, flatpak_ostree_object_name_equal, g_free, NULL);
+
+  if (load_extra_commitmeta (repo, checksum, &extra_commitmeta, cancellable, NULL) && extra_commitmeta)
+    commit_reachable = g_variant_lookup_value (extra_commitmeta, "xa.reachable", G_VARIANT_TYPE ("a(yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy)"));
+
+  if (commit_reachable)
+    {
+      gsize n_reachable, i;
+      const FlatpakOstreeObjectName *reachable_objects =
+        g_variant_get_fixed_array (commit_reachable, &n_reachable,
+                                     sizeof(FlatpakOstreeObjectName));
+
+      for (i = 0; i < n_reachable; i++)
+        {
+          FlatpakOstreeObjectName *name = g_new (FlatpakOstreeObjectName, 1);
+          memcpy (name, &reachable_objects[i], sizeof(FlatpakOstreeObjectName));
+          g_hash_table_add (reachable_ht, name);
+        }
+    }
+  else
+    {
+      g_autoptr(GHashTable) ostree_reachable_ht = g_hash_table_new_full (g_variant_hash, g_variant_equal, (GDestroyNotify)g_variant_unref, NULL);
+      if (!ostree_repo_traverse_commit_union (repo, checksum, 0, ostree_reachable_ht, cancellable, error))
+        {
+          g_hash_table_unref (reachable_ht);
+          return NULL;
+        }
+
+      GHashTableIter iter;
+      gpointer key;
+      g_hash_table_iter_init (&iter, ostree_reachable_ht);
+      while (g_hash_table_iter_next (&iter, &key, NULL))
+        {
+          VarObjectNameRef v_ref = var_object_name_from_gvariant (key);
+          FlatpakOstreeObjectName *name = g_new (FlatpakOstreeObjectName, 1);
+          flatpak_ostree_object_name_serialize (name, var_object_name_get_checksum (v_ref), var_object_name_get_objtype (v_ref));
+          g_hash_table_add (reachable_ht, name);
+        }
+    }
+
+  return reachable_ht;
+}
+
+GHashTable *
+flatpak_dir_get_ref_sizes (FlatpakDir *self, GCancellable *cancellable, GError **error)
+{
+  OstreeRepo *repo = flatpak_dir_get_repo (self);
+  g_autoptr(GHashTable) object_info = g_hash_table_new_full (flatpak_ostree_object_name_hash, flatpak_ostree_object_name_equal, g_free, g_free);
+  g_autoptr(GPtrArray) refs = flatpak_dir_list_refs (self, FLATPAK_KINDS_APP | FLATPAK_KINDS_RUNTIME, cancellable, error);
+  if (refs == NULL) return NULL;
+
+  g_autoptr(GPtrArray) ref_objects_list = g_ptr_array_new_with_free_func ((GDestroyNotify)g_hash_table_unref);
+
+  for (guint i = 0; i < refs->len; i++)
+    {
+      FlatpakDecomposed *ref = g_ptr_array_index (refs, i);
+      g_autofree char *checksum = flatpak_dir_read_active (self, ref, cancellable);
+      if (checksum == NULL)
+        {
+          g_ptr_array_add (ref_objects_list, NULL);
+          continue;
+        }
+
+      GHashTable *ref_objects = get_objects_for_commit (repo, checksum, cancellable, error);
+      if (ref_objects == NULL) return NULL;
+      g_ptr_array_add (ref_objects_list, ref_objects);
+
+      GHashTableIter iter;
+      gpointer key;
+      g_hash_table_iter_init (&iter, ref_objects);
+      while (g_hash_table_iter_next (&iter, &key, NULL))
+        {
+          ObjectInfo *info = g_hash_table_lookup (object_info, key);
+          if (info == NULL)
+            {
+              info = g_new0 (ObjectInfo, 1);
+              memcpy (&info->name, key, sizeof(FlatpakOstreeObjectName));
+
+              g_autofree char *checksum_str = ostree_checksum_from_bytes (&info->name[0]);
+              OstreeObjectType objtype = (OstreeObjectType)info->name[32];
+
+              ostree_repo_query_object_storage_size (repo, objtype, checksum_str, &info->size, cancellable, NULL);
+
+              FlatpakOstreeObjectName *name_copy = g_new (FlatpakOstreeObjectName, 1);
+              memcpy (name_copy, key, sizeof(FlatpakOstreeObjectName));
+              g_hash_table_insert (object_info, name_copy, info);
+            }
+          info->ref_count++;
+        }
+    }
+
+  GHashTable *res = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  for (guint i = 0; i < refs->len; i++)
+    {
+      FlatpakDecomposed *ref = g_ptr_array_index (refs, i);
+      GHashTable *ref_objects = g_ptr_array_index (ref_objects_list, i);
+      if (ref_objects == NULL) continue;
+
+      FlatpakRefSizes *sizes = g_new0 (FlatpakRefSizes, 1);
+      GHashTableIter iter;
+      gpointer key;
+      g_hash_table_iter_init (&iter, ref_objects);
+      while (g_hash_table_iter_next (&iter, &key, NULL))
+        {
+          ObjectInfo *info = g_hash_table_lookup (object_info, key);
+          sizes->installed_size += info->size;
+          if (info->ref_count == 1)
+            sizes->exclusive_size += info->size;
+        }
+      g_hash_table_insert (res, g_strdup (flatpak_decomposed_get_ref (ref)), sizes);
+    }
+
+  return res;
+}
+
+gboolean
+flatpak_dir_get_stats (FlatpakDir *self, FlatpakDirStats *out_stats, GCancellable *cancellable, GError **error)
+{
+  OstreeRepo *repo = flatpak_dir_get_repo (self);
+  g_autoptr(GHashTable) object_info = g_hash_table_new_full (flatpak_ostree_object_name_hash, flatpak_ostree_object_name_equal, g_free, g_free);
+  g_autoptr(GPtrArray) refs = flatpak_dir_list_refs (self, FLATPAK_KINDS_APP | FLATPAK_KINDS_RUNTIME, cancellable, error);
+  if (refs == NULL) return FALSE;
+
+  memset (out_stats, 0, sizeof (*out_stats));
+
+  for (guint i = 0; i < refs->len; i++)
+    {
+      FlatpakDecomposed *ref = g_ptr_array_index (refs, i);
+      g_autofree char *checksum = flatpak_dir_read_active (self, ref, cancellable);
+      if (checksum == NULL) continue;
+
+      if (flatpak_decomposed_is_app (ref))
+        out_stats->n_apps++;
+      else
+        out_stats->n_runtimes++;
+
+      g_autoptr(GHashTable) ref_objects = get_objects_for_commit (repo, checksum, cancellable, error);
+      if (ref_objects == NULL) return FALSE;
+
+      GHashTableIter iter;
+      gpointer key;
+      g_hash_table_iter_init (&iter, ref_objects);
+      while (g_hash_table_iter_next (&iter, &key, NULL))
+        {
+          ObjectInfo *info = g_hash_table_lookup (object_info, key);
+          if (info == NULL)
+            {
+              info = g_new0 (ObjectInfo, 1);
+              memcpy (&info->name, key, sizeof(FlatpakOstreeObjectName));
+              g_autofree char *checksum_str = ostree_checksum_from_bytes (&info->name[0]);
+              OstreeObjectType objtype = (OstreeObjectType)info->name[32];
+              ostree_repo_query_object_storage_size (repo, objtype, checksum_str, &info->size, cancellable, NULL);
+
+              FlatpakOstreeObjectName *name_copy = g_new (FlatpakOstreeObjectName, 1);
+              memcpy (name_copy, key, sizeof(FlatpakOstreeObjectName));
+              g_hash_table_insert (object_info, name_copy, info);
+            }
+          info->ref_count++;
+        }
+    }
+
+  GHashTableIter obj_iter;
+  gpointer obj_key, obj_value;
+  g_hash_table_iter_init (&obj_iter, object_info);
+  while (g_hash_table_iter_next (&obj_iter, &obj_key, obj_value))
+    {
+      ObjectInfo *info = obj_value;
+      if (info->ref_count == 1)
+        out_stats->exclusive_size += info->size;
+      else
+        out_stats->shared_size += info->size;
+    }
+
+  if (!flatpak_dir_get_installation_size (self, &out_stats->total_size, cancellable, error))
+    return FALSE;
+
+  return TRUE;
 }

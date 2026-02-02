@@ -69,6 +69,7 @@ static Column all_columns[] = {
   { "active",       N_("Active commit"),  N_("Show the active commit"),  1, FLATPAK_ELLIPSIZE_MODE_NONE, 1, 0 },
   { "latest",       N_("Latest commit"),  N_("Show the latest commit"),  1, FLATPAK_ELLIPSIZE_MODE_NONE, 1, 0 },
   { "size",         N_("Installed size"), N_("Show the installed size"), 1, FLATPAK_ELLIPSIZE_MODE_NONE, 1, 0 },
+  { "exclusive",    N_("Exclusive size"), N_("Show the exclusive size"), 1, FLATPAK_ELLIPSIZE_MODE_NONE, 1, 0 },
   { "options",      N_("Options"),        N_("Show options"),            1, FLATPAK_ELLIPSIZE_MODE_END, 1, 0 },
   { NULL }
 };
@@ -130,17 +131,32 @@ print_table_for_refs (gboolean      print_apps,
         return FALSE;
     }
 
+  gboolean need_ref_sizes = FALSE;
+  for (i = 0; columns[i].name; i++)
+    {
+      if (strcmp (columns[i].name, "exclusive") == 0)
+        need_ref_sizes = TRUE;
+    }
+
   for (i = 0; i < refs_array->len; i++)
     {
       RefsData *refs_data = NULL;
       FlatpakDir *dir = NULL;
       GPtrArray *dir_refs = NULL;
       g_autoptr(GHashTable) ref_hash = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, NULL);
+      g_autoptr(GHashTable) ref_sizes = NULL;
       int j;
 
       refs_data = (RefsData *) g_ptr_array_index (refs_array, i);
       dir = refs_data->dir;
       dir_refs = refs_data->refs;
+
+      if (need_ref_sizes)
+        {
+          ref_sizes = flatpak_dir_get_ref_sizes (dir, cancellable, error);
+          if (ref_sizes == NULL)
+            return FALSE;
+        }
 
       for (j = 0; j < dir_refs->len; j++)
         {
@@ -305,6 +321,20 @@ print_table_for_refs (gboolean      print_apps,
                   guint64 size = 0;
 
                   size = flatpak_deploy_data_get_installed_size (deploy_data);
+                  size_s = g_format_size (size);
+                  flatpak_table_printer_add_decimal_column (printer, size_s);
+                }
+              else if (strcmp (columns[k].name, "exclusive") == 0)
+                {
+                  g_autofree char *size_s = NULL;
+                  guint64 size = 0;
+
+                  if (ref_sizes)
+                    {
+                      FlatpakRefSizes *sizes = g_hash_table_lookup (ref_sizes, flatpak_decomposed_get_ref (ref));
+                      if (sizes)
+                        size = sizes->exclusive_size;
+                    }
                   size_s = g_format_size (size);
                   flatpak_table_printer_add_decimal_column (printer, size_s);
                 }

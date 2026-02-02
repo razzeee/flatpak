@@ -76,6 +76,19 @@ typedef struct
 void         flatpak_related_free (FlatpakRelated *related);
 
 typedef struct {
+  guint64 installed_size;
+  guint64 exclusive_size;
+} FlatpakRefSizes;
+
+typedef struct {
+  guint64 total_size;
+  guint64 exclusive_size;
+  guint64 shared_size;
+  int n_apps;
+  int n_runtimes;
+} FlatpakDirStats;
+
+typedef struct {
   OstreeRepo *repo;
   GVariant   *summary;
 } FlatpakSideloadState;
@@ -1050,5 +1063,17 @@ gboolean              flatpak_dir_pull_oci_extra_data                       (Ost
                                                                              const char              *rev,
                                                                              GCancellable            *cancellable,
                                                                              GError                 **error);
+
+GHashTable *          flatpak_dir_get_ref_sizes                             (FlatpakDir                    *self,
+                                                                             GCancellable                  *cancellable,
+                                                                             GError                       **error);
+gboolean              flatpak_dir_get_installation_size                     (FlatpakDir                    *self,
+                                                                             guint64                       *out_size,
+                                                                             GCancellable                  *cancellable,
+                                                                             GError                       **error);
+gboolean              flatpak_dir_get_stats                                 (FlatpakDir                    *self,
+                                                                             FlatpakDirStats               *out_stats,
+                                                                             GCancellable                  *cancellable,
+                                                                             GError                       **error);
 
 #endif /* __FLATPAK_DIR_H__ */

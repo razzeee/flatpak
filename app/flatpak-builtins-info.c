@@ -153,6 +153,16 @@ flatpak_builtin_info (int argc, char **argv, GCancellable *cancellable, GError *
   origin = flatpak_deploy_data_get_origin (deploy_data);
   size = flatpak_deploy_data_get_installed_size (deploy_data);
   formatted_size = g_format_size (size);
+
+  g_autoptr(GHashTable) ref_sizes = flatpak_dir_get_ref_sizes (dir, cancellable, NULL);
+  g_autofree char *formatted_exclusive_size = NULL;
+  if (ref_sizes)
+    {
+      FlatpakRefSizes *sizes = g_hash_table_lookup (ref_sizes, flatpak_decomposed_get_ref (ref));
+      if (sizes)
+        formatted_exclusive_size = g_format_size (sizes->exclusive_size);
+    }
+
   deploy_dir = flatpak_deploy_get_dir (deploy);
   path = flatpak_file_get_path_cached (deploy_dir);
   subpaths = flatpak_deploy_data_get_subpaths (deploy_data);
@@ -225,7 +235,9 @@ flatpak_builtin_info (int argc, char **argv, GCancellable *cancellable, GError *
       if (collection_id != NULL)
         len = MAX (len, g_utf8_strlen (_("Collection:"), -1));
       len = MAX (len, g_utf8_strlen (_("Installation:"), -1));
-      len = MAX (len, g_utf8_strlen (_("Installed Size:"), -1));
+      len = MAX (len, g_utf8_strlen (_("Installed size:"), -1));
+      if (formatted_exclusive_size)
+        len = MAX (len, g_utf8_strlen (_("Exclusive size:"), -1));
       if (flatpak_decomposed_is_app (ref))
         {
           len = MAX (len, g_utf8_strlen (_("Runtime:"), -1));
@@ -268,7 +280,9 @@ flatpak_builtin_info (int argc, char **argv, GCancellable *cancellable, GError *
       if (collection_id)
         print_aligned (len, _("Collection:"), collection_id);
       print_aligned (len, _("Installation:"), flatpak_dir_get_name_cached (dir));
-      print_aligned (len, _("Installed Size:"), formatted_size);
+      print_aligned (len, _("Installed size:"), formatted_size);
+      if (formatted_exclusive_size)
+        print_aligned (len, _("Exclusive size:"), formatted_exclusive_size);
       if (flatpak_decomposed_is_app (ref))
         {
           g_autofree char *runtime = NULL;

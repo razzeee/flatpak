@@ -88,6 +88,7 @@ static FlatpakCommand commands[] = {
   { "history", N_("Show history"), flatpak_builtin_history, flatpak_complete_history },
   { "config", N_("Configure flatpak"), flatpak_builtin_config, flatpak_complete_config },
   { "repair", N_("Repair flatpak installation"), flatpak_builtin_repair, flatpak_complete_repair },
+  { "stats", N_("Show statistics about installations"), flatpak_builtin_stats, flatpak_complete_stats },
   { "create-usb", N_("Put applications or runtimes onto removable media"), flatpak_builtin_create_usb, flatpak_complete_create_usb },
   { "preinstall", N_("Install flatpaks that are part of the operating system"), flatpak_builtin_preinstall, flatpak_complete_preinstall },
 

@@ -110,6 +110,7 @@ sources = [
   'flatpak-builtins-remote-modify.c',
   'flatpak-builtins-repair.c',
   'flatpak-builtins-repo.c',
+  'flatpak-builtins-stats.c',
   'flatpak-builtins-run.c',
   'flatpak-builtins-search.c',
   'flatpak-builtins-uninstall.c',
