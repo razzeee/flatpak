@@ -549,6 +549,13 @@ char *                flatpak_dir_load_override                             (Fla
                                                                              gsize                         *length,
                                                                              GFile                        **file_out,
                                                                              GError                       **error);
+gboolean              flatpak_dir_save_override                             (FlatpakDir                    *self,
+                                                                             const char                    *app_id,
+                                                                             GKeyFile                      *metakey,
+                                                                             GError                       **error);
+gboolean              flatpak_dir_remove_override                           (FlatpakDir                    *self,
+                                                                             const char                    *app_id,
+                                                                             GError                       **error);
 OstreeRepo *          flatpak_dir_get_repo                                  (FlatpakDir                    *self);
 gboolean              flatpak_dir_ensure_path                               (FlatpakDir                    *self,
                                                                              GCancellable                  *cancellable,

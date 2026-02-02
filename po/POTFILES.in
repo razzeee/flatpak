@@ -23,6 +23,7 @@ app/flatpak-builtins-kill.c
 app/flatpak-builtins-list.c
 app/flatpak-builtins-make-current.c
 app/flatpak-builtins-mask.c
+app/flatpak-builtins-move.c
 app/flatpak-builtins-override.c
 app/flatpak-builtins-permission-list.c
 app/flatpak-builtins-permission-remove.c

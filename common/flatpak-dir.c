@@ -3549,21 +3549,60 @@ flatpak_save_override_keyfile (GKeyFile   *metakey,
 }
 
 gboolean
+flatpak_dir_save_override (FlatpakDir *self,
+                           const char *app_id,
+                           GKeyFile   *metakey,
+                           GError    **error)
+{
+  g_autoptr(GFile) override_dir = NULL;
+  g_autoptr(GFile) file = NULL;
+  g_autofree char *filename = NULL;
+  g_autofree char *parent = NULL;
+
+  override_dir = g_file_get_child (self->basedir, "overrides");
+
+  if (app_id)
+    file = g_file_get_child (override_dir, app_id);
+  else
+    file = g_file_get_child (override_dir, "global");
+
+  filename = g_file_get_path (file);
+  parent = g_path_get_dirname (filename);
+  if (g_mkdir_with_parents (parent, 0755))
+    {
+      glnx_set_error_from_errno (error);
+      return FALSE;
+    }
+
+  return g_key_file_save_to_file (metakey, filename, error);
+}
+
+gboolean
 flatpak_remove_override_keyfile (const char *app_id,
                                  gboolean    user,
                                  GError    **error)
 {
   g_autoptr(GFile) base_dir = NULL;
-  g_autoptr(GFile) override_dir = NULL;
-  g_autoptr(GFile) file = NULL;
-  g_autoptr(GError) local_error = NULL;
 
   if (user)
     base_dir = flatpak_get_user_base_dir_location ();
   else
     base_dir = flatpak_get_system_default_base_dir_location ();
 
-  override_dir = g_file_get_child (base_dir, "overrides");
+  g_autoptr(FlatpakDir) dir = flatpak_dir_new (base_dir, user);
+  return flatpak_dir_remove_override (dir, app_id, error);
+}
+
+gboolean
+flatpak_dir_remove_override (FlatpakDir *self,
+                             const char *app_id,
+                             GError    **error)
+{
+  g_autoptr(GFile) override_dir = NULL;
+  g_autoptr(GFile) file = NULL;
+  g_autoptr(GError) local_error = NULL;
+
+  override_dir = g_file_get_child (self->basedir, "overrides");
 
   if (app_id)
     file = g_file_get_child (override_dir, app_id);

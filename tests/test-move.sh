@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-. $(dirname $0)/libtest.sh
+. "$(dirname "$0")/libtest.sh"
 
 # This test looks for specific localized strings.
 export LC_ALL=C
@@ -11,7 +11,7 @@ echo "1..1"
 
 # We want to start with a system installation
 export USE_SYSTEMDIR=yes
-. $(dirname $0)/libtest.sh
+. "$(dirname "$0")/libtest.sh"
 
 setup_repo
 install_repo

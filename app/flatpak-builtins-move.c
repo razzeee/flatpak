@@ -31,8 +31,8 @@
 #include "flatpak-utils-private.h"
 #include "flatpak-cli-transaction.h"
 #include "flatpak-quiet-transaction.h"
-#include <flatpak-dir-private.h>
-#include <flatpak-installation-private.h>
+#include "flatpak-dir-private.h"
+#include "flatpak-installation-private.h"
 #include "flatpak-error.h"
 
 static char *opt_arch;
@@ -121,16 +121,16 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
   g_autoptr(GOptionContext) context = NULL;
   g_autoptr(GPtrArray) dirs = NULL;
   FlatpakDir *dest_dir;
-  g_autoptr(FlatpakInstallation) dest_installation = NULL;
   char **prefs = NULL;
   int i, n_prefs;
   FlatpakKinds kinds;
-  g_autoptr(GList) move_ops = NULL;
+  GList *move_ops = NULL;
   GList *l;
   g_autoptr(FlatpakTransaction) transaction = NULL;
   g_autoptr(GHashTable) source_dirs = NULL;
   GHashTableIter hash_iter;
-  gpointer key;
+  gpointer key, value;
+  gboolean res = FALSE;
 
   context = g_option_context_new (_("[REF…] - Move applications or runtimes between installations"));
   g_option_context_set_translation_domain (context, GETTEXT_PACKAGE);
@@ -141,12 +141,12 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
     return FALSE;
 
   dest_dir = g_ptr_array_index (dirs, 0);
-  dest_installation = flatpak_installation_new_for_dir (dest_dir, cancellable, error);
-  if (dest_installation == NULL)
-    return FALSE;
 
   if (argc < 2)
-    return usage_error (context, _("At least one REF must be specified"), error);
+    {
+      usage_error (context, _("At least one REF must be specified"), error);
+      goto out;
+    }
 
   if (opt_noninteractive)
     opt_yes = TRUE;
@@ -155,7 +155,7 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
   n_prefs = argc - 1;
   kinds = flatpak_kinds_from_bools (opt_app, opt_runtime);
 
-  source_dirs = g_hash_table_new (g_direct_hash, g_direct_equal);
+  source_dirs = g_hash_table_new_full ((GHashFunc) g_file_hash, (GEqualFunc) g_file_equal, g_object_unref, g_object_unref);
 
   for (i = 0; i < n_prefs; i++)
     {
@@ -169,8 +169,7 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
       if (source_dir == NULL)
         {
           g_propagate_error (error, g_steal_pointer (&local_error));
-          g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
-          return FALSE;
+          goto out;
         }
 
       if (g_file_equal (flatpak_dir_get_path (source_dir), flatpak_dir_get_path (dest_dir)))
@@ -181,10 +180,7 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
 
       g_autofree char *remote = flatpak_dir_get_origin (source_dir, ref, cancellable, error);
       if (remote == NULL)
-        {
-          g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
-          return FALSE;
-        }
+        goto out;
 
       MoveOp *op = g_new0 (MoveOp, 1);
       op->source_dir = g_object_ref (source_dir);
@@ -192,11 +188,14 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
       op->remote = g_strdup (remote);
       move_ops = g_list_prepend (move_ops, op);
 
-      g_hash_table_insert (source_dirs, source_dir, source_dir);
+      g_hash_table_insert (source_dirs, g_object_ref (flatpak_dir_get_path (source_dir)), g_object_ref (source_dir));
     }
 
   if (move_ops == NULL)
-    return TRUE;
+    {
+      res = TRUE;
+      goto out;
+    }
 
   move_ops = g_list_reverse (move_ops);
 
@@ -204,19 +203,16 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
   if (opt_noninteractive)
     transaction = flatpak_quiet_transaction_new (dest_dir, error);
   else
-    transaction = flatpak_cli_transaction_new (dest_dir, opt_yes, TRUE, opt_arch == NULL, error);
+    transaction = flatpak_cli_transaction_new (dest_dir, opt_yes, TRUE, opt_arch != NULL, error);
 
   if (transaction == NULL)
-    {
-      g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
-      return FALSE;
-    }
+    goto out;
 
   /* Add source repos as sideload repos */
   g_hash_table_iter_init (&hash_iter, source_dirs);
-  while (g_hash_table_iter_next (&hash_iter, &key, NULL))
+  while (g_hash_table_iter_next (&hash_iter, &key, &value))
     {
-      FlatpakDir *s_dir = key;
+      FlatpakDir *s_dir = value;
       g_autoptr(GFile) repo_path = g_file_get_child (flatpak_dir_get_path (s_dir), "repo");
       g_autofree char *path = g_file_get_path (repo_path);
       flatpak_transaction_add_sideload_repo (transaction, path);
@@ -227,56 +223,42 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
     {
       MoveOp *op = l->data;
       if (!ensure_remote (dest_dir, op->source_dir, op->remote, cancellable, error))
-        {
-          g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
-          return FALSE;
-        }
+        goto out;
 
       if (!flatpak_transaction_add_install (transaction, op->remote, flatpak_decomposed_get_ref (op->ref), NULL, error))
-        {
-          g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
-          return FALSE;
-        }
+        goto out;
     }
 
   if (!flatpak_transaction_run (transaction, cancellable, error))
-    {
-      g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
-      return FALSE;
-    }
+    goto out;
 
   /* Now do uninstalls from sources */
   /* We do this one source installation at a time */
   g_hash_table_iter_init (&hash_iter, source_dirs);
-  while (g_hash_table_iter_next (&hash_iter, &key, NULL))
+  while (g_hash_table_iter_next (&hash_iter, &key, &value))
     {
-      FlatpakDir *s_dir = key;
+      FlatpakDir *s_dir = value;
       g_autoptr(FlatpakTransaction) uninst_transaction = NULL;
       gboolean any_uninst = FALSE;
 
       if (opt_noninteractive)
         uninst_transaction = flatpak_quiet_transaction_new (s_dir, error);
       else
-        uninst_transaction = flatpak_cli_transaction_new (s_dir, opt_yes, TRUE, opt_arch == NULL, error);
+        uninst_transaction = flatpak_cli_transaction_new (s_dir, opt_yes, TRUE, opt_arch != NULL, error);
 
       if (uninst_transaction == NULL)
-        {
-          g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
-          return FALSE;
-        }
+        goto out;
 
       flatpak_transaction_set_no_pull (uninst_transaction, TRUE);
 
       for (l = move_ops; l; l = l->next)
         {
           MoveOp *op = l->data;
-          if (op->source_dir == s_dir)
+          /* Check if source dir path matches */
+          if (g_file_equal (flatpak_dir_get_path (op->source_dir), flatpak_dir_get_path (s_dir)))
             {
               if (!flatpak_transaction_add_uninstall (uninst_transaction, flatpak_decomposed_get_ref (op->ref), error))
-                {
-                  g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
-                  return FALSE;
-                }
+                goto out;
               any_uninst = TRUE;
             }
         }
@@ -284,10 +266,7 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
       if (any_uninst)
         {
           if (!flatpak_transaction_run (uninst_transaction, cancellable, error))
-            {
-              g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
-              return FALSE;
-            }
+            goto out;
         }
     }
 
@@ -295,8 +274,7 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
   for (l = move_ops; l; l = l->next)
     {
       MoveOp *op = l->data;
-      if (flatpak_decomposed_is_app (op->ref) &&
-          flatpak_dir_is_user (op->source_dir) != flatpak_dir_is_user (dest_dir))
+      if (flatpak_decomposed_is_app (op->ref))
         {
           g_autofree char *id = flatpak_decomposed_dup_id (op->ref);
           gsize metadata_size;
@@ -307,12 +285,12 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
               g_autoptr(GKeyFile) metakey = g_key_file_new ();
               if (g_key_file_load_from_data (metakey, metadata_contents, metadata_size, 0, NULL))
                 {
-                   if (!flatpak_save_override_keyfile (metakey, id, flatpak_dir_is_user (dest_dir), &local_error))
+                   if (!flatpak_dir_save_override (dest_dir, id, metakey, &local_error))
                      g_warning ("Failed to migrate overrides for %s: %s", id, local_error->message);
                    else
                      {
                        /* Remove from source if successfully migrated */
-                       if (!flatpak_remove_override_keyfile (id, flatpak_dir_is_user (op->source_dir), &local_error))
+                       if (!flatpak_dir_remove_override (op->source_dir, id, &local_error))
                          g_warning ("Failed to remove source overrides for %s: %s", id, local_error->message);
                      }
                 }
@@ -320,9 +298,11 @@ flatpak_builtin_move (int argc, char **argv, GCancellable *cancellable, GError *
         }
     }
 
-  g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
+  res = TRUE;
 
-  return TRUE;
+out:
+  g_list_free_full (move_ops, (GDestroyNotify) move_op_free);
+  return res;
 }
 
 gboolean
