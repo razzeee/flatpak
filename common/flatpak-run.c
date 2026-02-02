@@ -1392,6 +1392,7 @@ flatpak_run_add_app_info_args (FlatpakBwrap           *bwrap,
                                GFile                  *original_runtime_files,
                                GBytes                 *runtime_deploy_data,
                                const char             *runtime_extensions,
+                               const char             *arch,
                                const char             *app_id,
                                const char             *app_branch,
                                FlatpakDecomposed      *runtime_ref,
@@ -1421,7 +1422,6 @@ flatpak_run_add_app_info_args (FlatpakBwrap           *bwrap,
   g_autofree char *instance_id_host_private_dir = NULL;
   g_autofree char *instance_id_sandbox_dir = NULL;
   g_autofree char *instance_id_lock_file = NULL;
-  g_autofree char *arch = flatpak_decomposed_dup_arch (runtime_ref);
 
   g_return_val_if_fail (app_id != NULL, FALSE);
 
@@ -1455,8 +1455,9 @@ flatpak_run_add_app_info_args (FlatpakBwrap           *bwrap,
     group = FLATPAK_METADATA_GROUP_RUNTIME;
 
   g_key_file_set_string (keyfile, group, FLATPAK_METADATA_KEY_NAME, app_id);
-  g_key_file_set_string (keyfile, group, FLATPAK_METADATA_KEY_RUNTIME,
-                         flatpak_decomposed_get_ref (runtime_ref));
+  if (runtime_ref)
+    g_key_file_set_string (keyfile, group, FLATPAK_METADATA_KEY_RUNTIME,
+                           flatpak_decomposed_get_ref (runtime_ref));
 
   g_key_file_set_string (keyfile, FLATPAK_METADATA_GROUP_INSTANCE,
                          FLATPAK_METADATA_KEY_INSTANCE_ID, instance_id);
@@ -1487,11 +1488,15 @@ flatpak_run_add_app_info_args (FlatpakBwrap           *bwrap,
   if (app_extensions && *app_extensions != 0)
     g_key_file_set_string (keyfile, FLATPAK_METADATA_GROUP_INSTANCE,
                            FLATPAK_METADATA_KEY_APP_EXTENSIONS, app_extensions);
-  runtime_path = g_file_get_path (runtime_files);
-  g_key_file_set_string (keyfile, FLATPAK_METADATA_GROUP_INSTANCE,
-                         FLATPAK_METADATA_KEY_RUNTIME_PATH, runtime_path);
 
-  if (runtime_files != original_runtime_files)
+  if (runtime_files)
+    {
+      runtime_path = g_file_get_path (runtime_files);
+      g_key_file_set_string (keyfile, FLATPAK_METADATA_GROUP_INSTANCE,
+                             FLATPAK_METADATA_KEY_RUNTIME_PATH, runtime_path);
+    }
+
+  if (runtime_files != original_runtime_files && original_runtime_files != NULL)
     {
       g_autofree char *path = g_file_get_path (original_runtime_files);
       g_key_file_set_string (keyfile, FLATPAK_METADATA_GROUP_INSTANCE,
@@ -2666,7 +2671,8 @@ calculate_ld_cache_checksum (GBytes   *app_deploy_data,
   g_autoptr(GChecksum) ld_so_checksum = g_checksum_new (G_CHECKSUM_SHA256);
   if (app_deploy_data)
     g_checksum_update (ld_so_checksum, (guchar *) flatpak_deploy_data_get_commit (app_deploy_data), -1);
-  g_checksum_update (ld_so_checksum, (guchar *) flatpak_deploy_data_get_commit (runtime_deploy_data), -1);
+  if (runtime_deploy_data)
+    g_checksum_update (ld_so_checksum, (guchar *) flatpak_deploy_data_get_commit (runtime_deploy_data), -1);
   if (app_extensions)
     g_checksum_update (ld_so_checksum, (guchar *) app_extensions, -1);
   if (runtime_extensions)
@@ -3100,17 +3106,15 @@ flatpak_run_app (FlatpakDecomposed   *app_ref,
       metakey = flatpak_deploy_get_metadata (app_deploy);
       default_runtime_pref = g_key_file_get_string (metakey,
                                                     FLATPAK_METADATA_GROUP_APPLICATION,
-                                                    key, &my_error);
-      if (my_error)
-        {
-          g_propagate_error (error, g_steal_pointer (&my_error));
-          return FALSE;
-        }
+                                                    key, NULL);
     }
 
-  default_runtime = flatpak_decomposed_new_from_pref (FLATPAK_KINDS_RUNTIME, default_runtime_pref, error);
-  if (default_runtime == NULL)
-    return FALSE;
+  if (default_runtime_pref != NULL)
+    {
+      default_runtime = flatpak_decomposed_new_from_pref (FLATPAK_KINDS_RUNTIME, default_runtime_pref, error);
+      if (default_runtime == NULL)
+        return FALSE;
+    }
 
   if (custom_runtime != NULL || custom_runtime_version != NULL)
     {
@@ -3136,6 +3140,13 @@ flatpak_run_app (FlatpakDecomposed   *app_ref,
             }
         }
 
+      if (default_runtime == NULL)
+        {
+          g_set_error_literal (error, FLATPAK_ERROR, FLATPAK_ERROR_INVALID_REF,
+                               _("Custom runtime specified but no default runtime available"));
+          return FALSE;
+        }
+
       runtime_ref = flatpak_decomposed_new_from_decomposed (default_runtime,
                                                             FLATPAK_KINDS_RUNTIME,
                                                             custom_runtime_id,
@@ -3145,18 +3156,21 @@ flatpak_run_app (FlatpakDecomposed   *app_ref,
       if (runtime_ref == NULL)
         return FALSE;
     }
-  else
+  else if (default_runtime != NULL)
     runtime_ref = flatpak_decomposed_ref (default_runtime);
 
-  runtime_deploy = flatpak_find_deploy_for_ref (flatpak_decomposed_get_ref (runtime_ref), custom_runtime_commit, NULL, cancellable, error);
-  if (runtime_deploy == NULL)
-    return FALSE;
+  if (runtime_ref != NULL)
+    {
+      runtime_deploy = flatpak_find_deploy_for_ref (flatpak_decomposed_get_ref (runtime_ref), custom_runtime_commit, NULL, cancellable, error);
+      if (runtime_deploy == NULL)
+        return FALSE;
 
-  runtime_deploy_data = flatpak_deploy_get_deploy_data (runtime_deploy, FLATPAK_DEPLOY_VERSION_ANY, cancellable, error);
-  if (runtime_deploy_data == NULL)
-    return FALSE;
+      runtime_deploy_data = flatpak_deploy_get_deploy_data (runtime_deploy, FLATPAK_DEPLOY_VERSION_ANY, cancellable, error);
+      if (runtime_deploy_data == NULL)
+        return FALSE;
 
-  runtime_metakey = flatpak_deploy_get_metadata (runtime_deploy);
+      runtime_metakey = flatpak_deploy_get_metadata (runtime_deploy);
+    }
 
   app_context = flatpak_app_compute_permissions (metakey, runtime_metakey, error);
   if (app_context == NULL)
@@ -3187,7 +3201,8 @@ flatpak_run_app (FlatpakDecomposed   *app_ref,
   sockets = flatpak_run_compute_allowed_sockets (app_context);
   features = flatpak_run_compute_allowed_features (app_context);
 
-  original_runtime_files = flatpak_deploy_get_files (runtime_deploy);
+  if (runtime_deploy != NULL)
+    original_runtime_files = flatpak_deploy_get_files (runtime_deploy);
 
   if (custom_usr_path != NULL)
     {
@@ -3332,18 +3347,27 @@ flatpak_run_app (FlatpakDecomposed   *app_ref,
       flatpak_bwrap_set_env (bwrap, "FLATPAK_SANDBOX_DIR", flatpak_file_get_path_cached (sandbox_dir), TRUE);
     }
 
-  flatpak_bwrap_add_args (bwrap,
-                          "--ro-bind", flatpak_file_get_path_cached (runtime_files), "/usr",
-                          NULL);
+  if (runtime_files != NULL)
+    {
+      flatpak_bwrap_add_args (bwrap,
+                              "--ro-bind", flatpak_file_get_path_cached (runtime_files), "/usr",
+                              NULL);
+    }
+  else
+    {
+      flatpak_bwrap_add_args (bwrap,
+                              "--symlink", "app", "/usr",
+                              NULL);
+    }
 
-  if (runtime_files == original_runtime_files)
+  if (runtime_files != NULL && runtime_files == original_runtime_files)
     {
       /* All true Flatpak runtimes have files/.ref */
       flatpak_bwrap_add_args (bwrap,
                               "--lock-file", "/usr/.ref",
                               NULL);
     }
-  else
+  else if (original_runtime_files != NULL)
     {
       g_autoptr(GFile) runtime_child = NULL;
 
@@ -3439,9 +3463,12 @@ flatpak_run_app (FlatpakDecomposed   *app_ref,
   if (custom_app_path == NULL)
     flatpak_run_extend_ld_path (bwrap, app_ld_path, NULL);
 
-  runtime_ld_so_conf = g_file_resolve_relative_path (runtime_files, "etc/ld.so.conf");
-  if (lstat (flatpak_file_get_path_cached (runtime_ld_so_conf), &s) == 0)
-    generate_ld_so_conf = S_ISREG (s.st_mode) && s.st_size == 0;
+  if (runtime_files)
+    {
+      runtime_ld_so_conf = g_file_resolve_relative_path (runtime_files, "etc/ld.so.conf");
+      if (lstat (flatpak_file_get_path_cached (runtime_ld_so_conf), &s) == 0)
+        generate_ld_so_conf = S_ISREG (s.st_mode) && s.st_size == 0;
+    }
 
   /* At this point we have the minimal argv set up, with just the app, runtime and extensions.
      We can reuse this to generate the ld.so.cache (if needed) */
@@ -3453,7 +3480,7 @@ flatpak_run_app (FlatpakDecomposed   *app_ref,
                                       bwrap->fds,
                                       app_id_dir,
                                       checksum,
-                                      runtime_files,
+                                      runtime_files ? runtime_files : app_files,
                                       generate_ld_so_conf,
                                       cancellable, error);
       if (ld_so_fd == -1)
@@ -3463,7 +3490,7 @@ flatpak_run_app (FlatpakDecomposed   *app_ref,
 
   flags |= flatpak_context_features_to_run_flags (features);
 
-  if (!flatpak_run_setup_base_argv (bwrap, runtime_files, app_id_dir, app_arch, flags, error))
+  if (!flatpak_run_setup_base_argv (bwrap, runtime_files ? runtime_files : app_files, app_id_dir, app_arch, flags, error))
     return FALSE;
 
   if (generate_ld_so_conf)
@@ -3483,6 +3510,7 @@ flatpak_run_app (FlatpakDecomposed   *app_ref,
   if (!flatpak_run_add_app_info_args (bwrap,
                                       app_files, original_app_files, app_deploy_data, app_extensions,
                                       runtime_files, original_runtime_files, runtime_deploy_data, runtime_extensions,
+                                      app_arch,
                                       app_id, flatpak_decomposed_get_branch (app_ref),
                                       runtime_ref, app_id_dir,
                                       app_context, extra_context, sockets,
