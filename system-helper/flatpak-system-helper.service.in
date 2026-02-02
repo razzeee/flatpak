@@ -7,3 +7,7 @@ Environment=XDG_DATA_DIRS=@localstatedir@/lib/flatpak/exports/share/:/usr/local/
 ExecStart=@libexecdir@/flatpak-system-helper
 Type=dbus
 IOSchedulingClass=idle
+OOMScoreAdjust=100
+MemoryHigh=128M
+MemoryMax=256M
+OOMPolicy=kill
