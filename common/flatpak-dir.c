@@ -16543,6 +16543,24 @@ add_related (FlatpakDir        *self,
        * that would otherwise be used */
       remote = flatpak_deploy_data_get_origin (deploy_data);
     }
+  else
+    {
+      g_autoptr(GPtrArray) installed = flatpak_dir_find_installed_refs (self, id, NULL, arch, FLATPAK_KINDS_RUNTIME, FIND_MATCHING_REFS_FLAGS_NONE, NULL);
+      if (installed != NULL && installed->len > 0)
+        {
+          /* If the extension is installed in another branch, we treat it as "already installed"
+           * and use its origin. This makes it follow the branch of the main app/runtime. */
+          FlatpakDecomposed *first_installed = g_ptr_array_index (installed, 0);
+          g_autoptr(GBytes) first_deploy_data = flatpak_dir_get_deploy_data (self, first_installed, FLATPAK_DEPLOY_VERSION_ANY, NULL, NULL);
+
+          if (first_deploy_data)
+            {
+              deploy_data = g_steal_pointer (&first_deploy_data);
+              old_subpaths = flatpak_deploy_data_get_subpaths (deploy_data);
+              remote = flatpak_deploy_data_get_origin (deploy_data);
+            }
+        }
+    }
 
   /* Only respect no-autodownload/download-if for uninstalled refs, we
      always want to update if you manually installed something */
