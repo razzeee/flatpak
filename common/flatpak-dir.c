@@ -16550,6 +16550,24 @@ add_related (FlatpakDir        *self,
     flatpak_extension_matches_reason (id, download_if, !no_autodownload) ||
     deploy_data != NULL;
 
+  if (!download)
+    {
+      g_autoptr(GPtrArray) installed_branches =
+        flatpak_dir_list_refs_for_name (self, FLATPAK_KINDS_RUNTIME, id, NULL, NULL);
+      if (installed_branches)
+        {
+          for (int i = 0; i < installed_branches->len; i++)
+            {
+              FlatpakDecomposed *installed_ref = g_ptr_array_index (installed_branches, i);
+              if (flatpak_decomposed_is_arch (installed_ref, arch))
+                {
+                  download = TRUE;
+                  break;
+                }
+            }
+        }
+    }
+
   if (!flatpak_extension_matches_reason (id, autoprune_unless, TRUE))
     auto_prune = TRUE;
 
