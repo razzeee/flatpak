@@ -8,7 +8,7 @@ set -euo pipefail
 
 . $(dirname $0)/libtest.sh
 
-echo "1..1"
+echo "1..2"
 
 setup_repo
 ${FLATPAK} ${U} install -y test-repo org.test.Hello >&2
@@ -33,3 +33,28 @@ ${FLATPAK} ${U} uninstall -y org.test.Platform org.test.Hello >&2
 ${FLATPAK} ${U} remote-delete test-repo >&2
 
 ok "repair command handles missing files"
+
+# Test that flatpak repair --reinstall-all does not change pin state
+# https://github.com/flatpak/flatpak/issues/6565
+setup_repo
+${FLATPAK} ${U} install -y test-repo org.test.Hello >&2
+
+# Record pin state before repair: org.test.Hello installs org.test.Platform as a
+# dependency (not explicitly), so it should NOT be auto-pinned
+PINS_BEFORE=$(${FLATPAK} ${U} pin)
+
+${FLATPAK} ${U} repair --reinstall-all >&2
+
+# Pin state must be identical after repair
+PINS_AFTER=$(${FLATPAK} ${U} pin)
+if [ "$PINS_BEFORE" != "$PINS_AFTER" ]; then
+    assert_not_reached "repair --reinstall-all changed pin state (before: '$PINS_BEFORE', after: '$PINS_AFTER')"
+fi
+
+# Clean up
+${FLATPAK} ${U} uninstall -y org.test.Platform org.test.Hello >&2
+# Remove any pins that may have been added before the fix
+${FLATPAK} ${U} pin --remove "runtime/org.test.Platform/$ARCH/master" &>/dev/null || true
+${FLATPAK} ${U} remote-delete test-repo >&2
+
+ok "repair --reinstall-all preserves pin state"
