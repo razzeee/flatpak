@@ -20,6 +20,10 @@ test_get_system_locales (void)
   const GPtrArray *again;
   gsize i;
 
+  /* The array must have at least the NULL terminator */
+  g_assert_cmpuint (result->len, >=, 1);
+  g_assert_null (g_ptr_array_index (result, result->len - 1));
+
   g_test_message ("System locales:");
 
   for (i = 0; i < result->len; i++)
@@ -31,8 +35,11 @@ test_get_system_locales (void)
         }
       else
         {
-          g_assert_nonnull (g_ptr_array_index (result, i));
-          g_test_message ("- %s", (char *) g_ptr_array_index (result, i));
+          const char *locale = g_ptr_array_index (result, i);
+          g_assert_nonnull (locale);
+          /* Each locale string must be non-empty */
+          g_assert_cmpstr (locale, !=, "");
+          g_test_message ("- %s", locale);
         }
     }
 
@@ -50,6 +57,10 @@ test_get_user_locales (void)
   const GPtrArray *again;
   gsize i;
 
+  /* The array must have at least the NULL terminator */
+  g_assert_cmpuint (result->len, >=, 1);
+  g_assert_null (g_ptr_array_index (result, result->len - 1));
+
   g_test_message ("User locales:");
 
   for (i = 0; i < result->len; i++)
@@ -61,8 +72,11 @@ test_get_user_locales (void)
         }
       else
         {
-          g_assert_nonnull (g_ptr_array_index (result, i));
-          g_test_message ("- %s", (char *) g_ptr_array_index (result, i));
+          const char *locale = g_ptr_array_index (result, i);
+          g_assert_nonnull (locale);
+          /* Each locale string must be non-empty */
+          g_assert_cmpstr (locale, !=, "");
+          g_test_message ("- %s", locale);
         }
     }
 
@@ -81,11 +95,17 @@ static const struct
 {
   { "C", NULL },
   { "C.UTF-8", NULL },
+  /* POSIX is not treated as C: the function only maps "C" to NULL */
+  { "POSIX", "POSIX" },
   { "en.ISO-8859-15", "en" },
   { "en@cantab", "en" },
   { "en_GB", "en" },
   { "en_US.utf8", "en" },
   { "sv_FI@euro", "sv" },
+  /* Multi-character language code with territory and encoding */
+  { "zh_CN.UTF-8", "zh" },
+  /* A string with no separator at all: returned as-is */
+  { "invalid", "invalid" },
 };
 
 static void
