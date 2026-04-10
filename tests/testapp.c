@@ -547,7 +547,10 @@ test_parse_datetime (void)
   ret = parse_datetime (&ts, "NOW", NULL);
   g_assert_true (ret);
 
-  g_assert_true (ts.tv_sec == now.tv_sec); // close enough
+  /* Allow a one-second window: if clock_gettime and parse_datetime
+   * straddle a second boundary the seconds may legitimately differ by 1. */
+  g_assert_cmpint (ts.tv_sec - now.tv_sec, >=, 0);
+  g_assert_cmpint (ts.tv_sec - now.tv_sec, <=, 1);
 
   ret = parse_datetime (&ts, "2018-10-29 00:19:07 +0000", NULL);
   g_assert_true (ret);
