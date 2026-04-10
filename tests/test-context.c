@@ -119,6 +119,7 @@ test_context_env_fd (void)
 
   bad_fd = fd;
   glnx_close_fd (&fd);
+  g_unlink (path);
   ok = flatpak_context_parse_env_fd (context, bad_fd, &error);
   g_assert_nonnull (error);
   g_test_message ("Got error as expected: %s #%d: %s",
