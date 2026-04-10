@@ -60,7 +60,7 @@ test_gc (void)
   g_autoptr(GError) error = NULL;
   g_autoptr(GPtrArray) instances = NULL;
   g_autofree char *instances_dir = flatpak_instance_get_instances_directory ();
-  g_autofree char *apps_dir = flatpak_instance_get_instances_directory ();
+  g_autofree char *apps_dir = flatpak_instance_get_apps_directory ();
   g_autofree char *hold_lock = g_test_build_filename (G_TEST_BUILT, "hold-lock", NULL);
   g_autofree char *alive_app_dir = NULL;
   g_autofree char *alive_app_lock = NULL;
