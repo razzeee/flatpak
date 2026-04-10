@@ -402,8 +402,6 @@ test_decompose (void)
     g_clear_error (&error);
 
     pref = flatpak_decomposed_new_from_pref (FLATPAK_KINDS_RUNTIME, "org.the.app.Locale/mips64/master", &error);
-    if (error)
-      g_print ("XXXXXXXX error: %s\n", error->message);
     g_assert_nonnull (pref);
     g_assert (error == NULL);
 
