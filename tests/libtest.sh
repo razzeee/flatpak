@@ -615,6 +615,16 @@ skip_without_ostree_version () {
     fi
 }
 
+skip_without_system_helper () {
+    # The system helper is bypassed when running as root (getuid() == 0) because
+    # root already has direct write access to the system installation directory.
+    # Tests that specifically exercise the system-helper code path must skip in
+    # that situation rather than silently pass via a different code path.
+    if [ x${USE_SYSTEMDIR-} == xyes ] && [ x${UID} == x0 ] ; then
+        skip "system helper not used when running as root"
+    fi
+}
+
 skip_without_libsystemd () {
   ${FLATPAK} history > history-log 2>&1 || true
   if  grep -q 'history not available without libsystemd' history-log; then

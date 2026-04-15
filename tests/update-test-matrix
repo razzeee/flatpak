@@ -38,6 +38,7 @@ TEST_MATRIX_SOURCE=(
 	'tests/test-extra-data.sh{user+system}' \
 	'tests/test-preinstall.sh' \
 	'tests/test-run-custom.sh{user+system}' \
+	'tests/test-upgrade-from-header.sh{user+system+system-norevokefs}' \
 )
 
 "${tests_srcdir}/expand-test-matrix.sh" --meson "${TEST_MATRIX_SOURCE[*]}" > "${tests_srcdir}/test-matrix/meson.build"
