@@ -891,6 +891,12 @@ check_if_autofs_works (FlatpakExports *exports,
         return FALSE;
     }
 
+  if (G_UNLIKELY (exports->test_flags & FLATPAK_EXPORTS_TEST_FLAGS_FUSE))
+    {
+      if (strcmp (path, "/broken-fuse") == 0)
+        return FALSE;
+    }
+
   return TRUE;
 }
 
@@ -971,13 +977,16 @@ _exports_path_expose (FlatpakExports *exports,
                        path, g_strerror (errno));
 
   if (stfs.f_type == AUTOFS_SUPER_MAGIC ||
+      stfs.f_type == FUSE_SUPER_MAGIC ||
       (G_UNLIKELY (exports->test_flags & FLATPAK_EXPORTS_TEST_FLAGS_AUTOFS) &&
+       S_ISDIR (st.st_mode)) ||
+      (G_UNLIKELY (exports->test_flags & FLATPAK_EXPORTS_TEST_FLAGS_FUSE) &&
        S_ISDIR (st.st_mode)))
     {
       if (!check_if_autofs_works (exports, path))
         {
           g_set_error (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK,
-                       _("Ignoring blocking autofs path \"%s\""), path);
+                       _("Ignoring blocking mount path \"%s\""), path);
           return FALSE;
         }
     }
