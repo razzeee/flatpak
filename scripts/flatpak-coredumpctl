@@ -51,16 +51,17 @@ class CoreDumper():
         with tempfile.NamedTemporaryFile() as coredump:
             dumpres = subprocess.run(
                 ["coredumpctl", "dump"] + shlex.split(self.coredumpctl_matches),
-                stdout=coredump, stderr=subprocess.PIPE, text=True
+                stdout=coredump, stderr=subprocess.PIPE
             )
+            stderr_text = dumpres.stderr.decode(errors="replace")
             if dumpres.returncode != 0:
                 print("Failed to retrieve coredump via coredumpctl.", file=sys.stderr)
-                if dumpres.stderr:
-                    print(f"Reason:\n{dumpres.stderr}", file=sys.stderr)
+                if stderr_text:
+                    print(f"Reason:\n{stderr_text}", file=sys.stderr)
 
                 sys.exit(dumpres.returncode)
 
-            executable, = re.findall(".*Executable: (.*)", dumpres.stderr)
+            executable, = re.findall(".*Executable: (.*)", stderr_text)
             if not executable.startswith(("/newroot/", "/app/")):
                 print(f"Executable {executable} doesn't seem to be a flatpaked application.",
                     file=sys.stderr)
