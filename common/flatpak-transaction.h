@@ -245,6 +245,11 @@ FLATPAK_EXTERN
 void                flatpak_transaction_set_force_uninstall (FlatpakTransaction *self,
                                                              gboolean            force_uninstall);
 FLATPAK_EXTERN
+void                flatpak_transaction_set_delete_data (FlatpakTransaction *self,
+                                                         gboolean            delete_data);
+FLATPAK_EXTERN
+gboolean            flatpak_transaction_get_delete_data (FlatpakTransaction *self);
+FLATPAK_EXTERN
 void                flatpak_transaction_set_default_arch (FlatpakTransaction *self,
                                                           const char         *arch);
 FLATPAK_EXTERN

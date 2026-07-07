@@ -24,6 +24,7 @@
 #include <glib/gi18n-lib.h>
 
 #include "flatpak-auth-private.h"
+#include "flatpak-app-data-private.h"
 #include "flatpak-dir-private.h"
 #include "flatpak-error.h"
 #include "flatpak-image-collection-private.h"
@@ -198,6 +199,7 @@ typedef struct _FlatpakTransactionPrivate
   gboolean                     disable_related;
   gboolean                     reinstall;
   gboolean                     force_uninstall;
+  gboolean                     delete_data;
   gboolean                     can_run;
   gboolean                     include_unused_uninstall_ops;
   gboolean                     auto_install_sdk;
@@ -1905,6 +1907,40 @@ flatpak_transaction_set_force_uninstall (FlatpakTransaction *self,
   FlatpakTransactionPrivate *priv = flatpak_transaction_get_instance_private (self);
 
   priv->force_uninstall = force_uninstall;
+}
+
+/**
+ * flatpak_transaction_set_delete_data:
+ * @self: a #FlatpakTransaction
+ * @delete_data: whether to delete app data when uninstalling apps
+ *
+ * Sets whether successful app uninstall operations should also delete the app's
+ * data directory in <filename>~/.var/app</filename> and reset its permissions
+ * in the permission store. Runtime uninstall operations are not affected.
+ */
+void
+flatpak_transaction_set_delete_data (FlatpakTransaction *self,
+                                     gboolean            delete_data)
+{
+  FlatpakTransactionPrivate *priv = flatpak_transaction_get_instance_private (self);
+
+  priv->delete_data = delete_data;
+}
+
+/**
+ * flatpak_transaction_get_delete_data:
+ * @self: a #FlatpakTransaction
+ *
+ * Gets whether successful app uninstall operations also delete app data.
+ *
+ * Returns: %TRUE if app data will be deleted
+ */
+gboolean
+flatpak_transaction_get_delete_data (FlatpakTransaction *self)
+{
+  FlatpakTransactionPrivate *priv = flatpak_transaction_get_instance_private (self);
+
+  return priv->delete_data;
 }
 
 /**
@@ -5273,6 +5309,14 @@ _run_op_kind (FlatpakTransaction           *self,
 
       if (res)
         {
+          if (priv->delete_data && flatpak_decomposed_is_app (op->ref))
+            {
+              g_autofree char *app_id = flatpak_decomposed_dup_id (op->ref);
+
+              if (!flatpak_delete_app_data (app_id, error))
+                return FALSE;
+            }
+
           emit_op_done (self, op, 0);
           *out_needs_prune = TRUE;
 

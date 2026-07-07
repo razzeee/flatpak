@@ -177,6 +177,7 @@ libflatpak_common_base_dep = declare_dependency(
 )
 
 sources = [
+  'flatpak-app-data.c',
   'flatpak-appdata.c',
   'flatpak-auth.c',
   'flatpak-bundle-ref.c',

@@ -2933,6 +2933,12 @@ test_misc_transaction (void)
   flatpak_transaction_set_no_pull (transaction, TRUE);
   g_assert_true (flatpak_transaction_get_no_pull (transaction) == TRUE);
 
+  flatpak_transaction_set_delete_data (transaction, TRUE);
+  g_assert_true (flatpak_transaction_get_delete_data (transaction) == TRUE);
+
+  flatpak_transaction_set_delete_data (transaction, FALSE);
+  g_assert_true (flatpak_transaction_get_delete_data (transaction) == FALSE);
+
   g_assert_true (flatpak_transaction_is_empty (transaction));
 }
 
