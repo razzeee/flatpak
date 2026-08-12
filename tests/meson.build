@@ -216,6 +216,22 @@ executable(
   install_dir : installed_testdir,
 )
 
+http_session_exe = executable(
+  'http-session',
+  'http-session.c',
+  dependencies : [
+    base_deps,
+    json_glib_dep,
+    libflatpak_common_dep,
+    libflatpak_common_base_dep,
+    libglnx_dep,
+    libostree_dep,
+  ],
+  include_directories : [common_include_directories],
+  install : get_option('installed_tests'),
+  install_dir : installed_testdir,
+)
+
 executable(
   'mock-flatpak',
   'mock-flatpak.c',
@@ -326,6 +342,7 @@ if get_option('installed_tests')
 
   install_data(
     'http-utils-test-server.py',
+    'http-session-test-server.py',
     'make-multi-collection-id-repo.sh',
     'make-test-app.sh',
     'make-test-runtime.sh',
@@ -486,11 +503,16 @@ foreach testcase : wrapped_tests
   test_env.set('LSAN_OPTIONS', lsan_options + lsan_log_path)
 
   if can_run_host_binaries
+    test_depends = [runtime_repo]
+    if script == 'test-http-utils.sh'
+      test_depends += http_session_exe
+    endif
+
     test(
       name,
       tap_test,
       args : [meson.current_source_dir() / name],
-      depends : runtime_repo,
+      depends : test_depends,
       env : test_env,
       is_parallel : is_parallel,
       protocol : 'tap',

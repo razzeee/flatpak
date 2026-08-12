@@ -65,7 +65,7 @@ have_xattrs() {
     setfattr -n user.testvalue -v somevalue $1/test-xattrs > /dev/null 2>&1
 }
 
-echo "1..6"
+echo "1..7"
 
 # Without anything else, cached for 30 minutes
 assert_ok "/" $test_tmpdir/output
@@ -158,3 +158,59 @@ if command -v setfattr >/dev/null &&
 else
     ok "xattrs # skip No setfattr or /var/tmp has user no xattr support"
 fi
+
+cat > openssl.config <<EOF
+[req]
+distinguished_name=default_dn
+
+[v3_ca]
+basicConstraints=critical,CA:TRUE,pathlen:0
+
+[server_cert]
+basicConstraints=CA:FALSE
+subjectAltName=IP:127.0.0.1
+
+[usr_cert]
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature
+extendedKeyUsage=clientAuth
+
+[default_dn]
+CN=Unused
+EOF
+
+openssl req -x509 -newkey rsa:2048 -sha256 -days 1 \
+    -nodes -keyout ca.key -out ca.crt -subj="/CN=Test CA" \
+    -config openssl.config -extensions v3_ca 2>/dev/null
+openssl req -newkey rsa:2048 -sha256 -nodes \
+    -keyout server.key -out server.csr -subj="/CN=127.0.0.1" 2>/dev/null
+openssl x509 -req -in server.csr -days 1 -CA ca.crt -CAkey ca.key \
+    -CAcreateserial -extfile openssl.config -extensions server_cert \
+    -out server.crt 2>/dev/null
+openssl req -newkey rsa:2048 -sha256 -nodes \
+    -keyout client.key -out client.csr -subj="/CN=Test Client" 2>/dev/null
+openssl x509 -req -in client.csr -days 1 -CA ca.crt -CAkey ca.key \
+    -CAcreateserial -extfile openssl.config -extensions usr_cert \
+    -out client.cert 2>/dev/null
+
+kill $(jobs -p)
+rm -f httpd-port
+httpd http-session-test-server.py \
+    --cert=server.crt --key=server.key --client-ca=ca.crt
+first_port=$(cat httpd-port)
+hostdir=$FLATPAK_SYSTEM_CERTS_D/127.0.0.1:${first_port}
+mkdir -p $hostdir
+cp ca.crt client.key client.cert $hostdir
+
+rm -f httpd-port
+httpd http-session-test-server.py \
+    --cert=server.crt --key=server.key --client-ca=ca.crt
+second_port=$(cat httpd-port)
+hostdir=$FLATPAK_SYSTEM_CERTS_D/127.0.0.1:${second_port}
+mkdir -p $hostdir
+cp ca.crt $hostdir
+
+${test_builddir}/http-session \
+    "https://127.0.0.1:${first_port}/require-client-cert" \
+    "https://127.0.0.1:${second_port}/forbid-client-cert"
+ok 'TLS options reset between requests'
