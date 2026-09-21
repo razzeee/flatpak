@@ -2848,7 +2848,7 @@ flatpak_installation_list_installed_related_refs_sync (FlatpakInstallation *self
   if (decomposed == NULL)
     return NULL;
 
-  related = flatpak_dir_find_local_related (dir, decomposed, remote_name, TRUE,
+  related = flatpak_dir_find_local_related (dir, decomposed, NULL, TRUE,
                                             cancellable, error);
   if (related == NULL)
     return NULL;
