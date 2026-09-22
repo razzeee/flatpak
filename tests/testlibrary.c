@@ -1162,6 +1162,70 @@ test_list_remote_refs (void)
     }
 }
 
+static void
+test_list_sideloaded_refs (gconstpointer data)
+{
+  g_autoptr(GError) error = NULL;
+  g_autoptr(FlatpakInstallation) inst = flatpak_installation_new_user (NULL, &error);
+  g_autoptr(FlatpakRemote) remote = NULL;
+  g_autoptr(FlatpakRemoteRef) expected = NULL;
+  g_autofree char *app_ref = g_strdup_printf ("app/org.test.Hello/%s/master", flatpak_get_default_arch ());
+  g_autofree char *sideload_dir = g_build_filename (g_get_user_data_dir (), "flatpak", "sideload-repos", NULL);
+  g_autofree char *repo_path = g_build_filename (sideload_dir, "test-query", NULL);
+  g_autofree char *repo_arg = g_strdup_printf ("--repo=%s", repo_path);
+  g_autofree char *collection_arg = g_strdup_printf ("--collection-id=%s", repo_collection_id);
+
+  g_assert_no_error (error);
+  expected = flatpak_installation_fetch_remote_ref_sync (inst, repo_name, FLATPAK_REF_KIND_APP,
+                                                        "org.test.Hello", NULL, "master", NULL, &error);
+  g_assert_no_error (error);
+  g_assert_nonnull (expected);
+  g_assert_cmpint (g_mkdir_with_parents (sideload_dir, 0755), ==, 0);
+
+  if (g_str_equal (data, "native"))
+    {
+      char *init[] = { "ostree", repo_arg, "init", "--mode=bare-user", collection_arg, NULL };
+      char *pull[] = { "ostree", repo_arg, "pull-local", "repos/test", app_ref, NULL };
+      char *summary[] = { "ostree", repo_arg, "summary", "--update", NULL };
+      run_test_subprocess (init, RUN_TEST_SUBPROCESS_DEFAULT);
+      run_test_subprocess (pull, RUN_TEST_SUBPROCESS_DEFAULT);
+      run_test_subprocess (summary, RUN_TEST_SUBPROCESS_DEFAULT);
+    }
+  else
+    {
+      char *usb[] = { "ostree", "--repo=repos/test", "create-usb", "--destination-repo=test-query",
+                     sideload_dir, repo_collection_id, app_ref, NULL };
+      run_test_subprocess (usb, RUN_TEST_SUBPROCESS_DEFAULT);
+    }
+
+  remote = flatpak_installation_get_remote_by_name (inst, repo_name, NULL, &error);
+  g_assert_no_error (error);
+  for (size_t i = 0; i < 2; i++)
+    {
+      g_autoptr(GPtrArray) refs = NULL;
+      flatpak_remote_set_collection_id (remote, i == 0 ? repo_collection_id : "org.test.Unrelated");
+      g_assert_true (flatpak_installation_modify_remote (inst, remote, NULL, &error));
+      g_assert_no_error (error);
+      refs = flatpak_installation_list_remote_refs_sync_full (inst, repo_name,
+                                                             FLATPAK_QUERY_FLAGS_ONLY_SIDELOADED,
+                                                             NULL, &error);
+      g_assert_no_error (error);
+      g_assert_nonnull (refs);
+      g_assert_cmpuint (refs->len, ==, i == 0 ? 1 : 0);
+      if (i == 0)
+        {
+          FlatpakRef *ref = g_ptr_array_index (refs, 0);
+          g_assert_cmpstr (flatpak_ref_format_ref_cached (ref), ==, app_ref);
+          g_assert_cmpstr (flatpak_ref_get_commit (ref), ==, flatpak_ref_get_commit (FLATPAK_REF (expected)));
+        }
+    }
+  flatpak_remote_set_collection_id (remote, repo_collection_id);
+  g_assert_true (flatpak_installation_modify_remote (inst, remote, NULL, &error));
+  g_assert_no_error (error);
+  g_assert_true (glnx_shutil_rm_rf_at (-1, repo_path, NULL, &error));
+  g_assert_no_error (error);
+}
+
 /* Test the xa.noenumerate option on a remote, which should mask non-installed refs */
 static void
 test_list_remote_refs_noenumerate (void)
@@ -5137,6 +5201,8 @@ main (int argc, char *argv[])
   g_test_add_func ("/library/remote-new", test_remote_new);
   g_test_add_func ("/library/remote-new-from-file", test_remote_new_from_file);
   g_test_add_func ("/library/list-remote-refs", test_list_remote_refs);
+  g_test_add_data_func ("/library/list-sideloaded-refs/native", "native", test_list_sideloaded_refs);
+  g_test_add_data_func ("/library/list-sideloaded-refs/usb", "usb", test_list_sideloaded_refs);
   g_test_add_func ("/library/list-remote-refs-noenumerate", test_list_remote_refs_noenumerate);
   g_test_add_func ("/library/list-remote-related-refs", test_list_remote_related_refs);
   g_test_add_func ("/library/list-remote-related-refs-for-installed", test_list_remote_related_refs_for_installed);
