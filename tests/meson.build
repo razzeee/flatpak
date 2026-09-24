@@ -367,6 +367,7 @@ tests = {
   'basic': {},
   'completion': {},
   'config': {},
+  'build-readonly': {},
   'build-update-repo': {},
   'http-utils': {},
   'run': {'wrap': [
