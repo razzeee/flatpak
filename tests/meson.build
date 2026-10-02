@@ -413,6 +413,7 @@ tests = {
   'extra-data': {'wrap': ['user', 'system']},
   'preinstall': {},
   'run-custom': {'wrap': ['user', 'system']},
+  'run-installations': {},
   'upgrade-from-header': {'wrap': ['user', 'system', 'system-norevokefs']},
   'metainfo-export': {},
 }
