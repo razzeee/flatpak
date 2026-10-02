@@ -14419,6 +14419,13 @@ flatpak_dir_list_all_remote_refs (FlatpakDir         *self,
               summary = var_summary_from_gvariant (ss->summary);
               exts = var_summary_get_metadata (summary);
 
+              if (g_strcmp0 (var_metadata_lookup_string (exts, "ostree.summary.collection-id", NULL),
+                             state->collection_id) == 0)
+                {
+                  ref_map = var_summary_get_ref_map (summary);
+                  populate_hash_table_from_refs_map (ret_all_refs, ref_mtimes, ref_map, NULL, state);
+                }
+
               if (var_metadata_lookup (exts, "ostree.summary.collection-map", NULL, &v))
                 {
                   VarCollectionMapRef map = var_collection_map_from_variant (v);
