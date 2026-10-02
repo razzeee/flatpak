@@ -4698,6 +4698,7 @@ test_list_installed_related_refs (void)
   FlatpakRelatedRef *ref;
   FlatpakInstalledRef *iref;
   gboolean res;
+  gboolean found_plugin = FALSE;
   g_autofree char *app = NULL;
 
   app = g_strdup_printf ("app/org.test.Hello/%s/master",
@@ -4809,8 +4810,52 @@ test_list_installed_related_refs (void)
   g_assert_cmpstr (flatpak_related_ref_get_subpaths (ref)[0], ==, "/de");
   g_assert_cmpstr (flatpak_related_ref_get_subpaths (ref)[1], ==, "/en");
 
+  g_clear_pointer (&refs, g_ptr_array_unref);
+
   configure_languages ("de");
   clean_extra_languages ();
+
+  /* Installed related refs can come from a different remote than the app. */
+  empty_installation (inst);
+  add_remote_user ("test-without-runtime", NULL);
+  flatpak_installation_drop_caches (inst, NULL, &error);
+  g_assert_no_error (error);
+
+  G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+  iref = flatpak_installation_install (inst, repo_name, FLATPAK_REF_KIND_APP,
+                                       "org.test.Hello", NULL, "master", NULL,
+                                       NULL, NULL, &error);
+  G_GNUC_END_IGNORE_DEPRECATIONS
+  g_assert_no_error (error);
+  g_assert_nonnull (iref);
+  g_clear_object (&iref);
+
+  G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+  iref = flatpak_installation_install (inst, "test-without-runtime-repo",
+                                       FLATPAK_REF_KIND_RUNTIME,
+                                       "org.test.Hello.Plugin.fun", NULL, "v1",
+                                       NULL, NULL, NULL, &error);
+  G_GNUC_END_IGNORE_DEPRECATIONS
+  g_assert_no_error (error);
+  g_assert_nonnull (iref);
+  g_clear_object (&iref);
+
+  refs = flatpak_installation_list_installed_related_refs_sync (inst, repo_name,
+                                                                 app, NULL, &error);
+  g_assert_no_error (error);
+  g_assert_nonnull (refs);
+  for (guint i = 0; i < refs->len; i++)
+    {
+      ref = g_ptr_array_index (refs, i);
+      if (g_str_equal (flatpak_ref_get_name (FLATPAK_REF (ref)),
+                       "org.test.Hello.Plugin.fun"))
+        found_plugin = TRUE;
+    }
+  g_assert_true (found_plugin);
+  g_clear_pointer (&refs, g_ptr_array_unref);
+
+  empty_installation (inst);
+  remove_remote_user ("test-without-runtime-repo");
 }
 
 static void
