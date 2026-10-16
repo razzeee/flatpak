@@ -47,7 +47,20 @@ INSTALLED_COMMIT=$(${FLATPAK} ${U} info --show-commit org.test.Hello)
 make_updated_app
 truncate -s 0 httpd-headers-log
 
+# Completed downloads must still run the update's mirror-ref cleanup.
+MIRROR_REF_FILE="${FL_DIR}/repo/refs/mirrors/org.test.Prefetch/${APP_REF}"
+mkdir -p "$(dirname "${MIRROR_REF_FILE}")"
+printf '%s\n' "${INSTALLED_COMMIT}" > "${MIRROR_REF_FILE}"
+
 ${FLATPAK} ${U} update -y org.test.Hello >&2
+
+UPDATED_COMMIT=$(${FLATPAK} ${U} info --show-commit org.test.Hello)
+test "${UPDATED_COMMIT}" != "${INSTALLED_COMMIT}"
+assert_not_file_has_content httpd-headers-log "Flatpak-Upgrade-From: ${UPDATED_COMMIT}"
+ok "completed update pull is consumed without another pull from the new commit"
+
+assert_not_has_file "${MIRROR_REF_FILE}"
+ok "completed update pull preserves mirror-ref cleanup"
 
 assert_file_has_content httpd-headers-log "Flatpak-Upgrade-From: ${INSTALLED_COMMIT}"
 
