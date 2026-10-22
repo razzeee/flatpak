@@ -1098,6 +1098,9 @@ main (int argc, char *argv[])
 {
   g_test_init (&argc, &argv, NULL);
 
+  /* Run internal permission tests without testlibrary's repository setup. */
+  flatpak_add_all_tests ();
+
   g_test_add_func ("/context/env", test_context_env);
   g_test_add_func ("/context/env-fd", test_context_env_fd);
   g_test_add_func ("/context/merge-fs", test_context_merge_fs);

@@ -57,6 +57,37 @@ working on. This can be accomplished with a command like:
 meson test -C _build test-info@user.wrap test-info@system.wrap
 ```
 
+### Memory-leak checks
+
+CI runs the `leak-check` suite with the GCC AddressSanitizer build:
+
+```
+meson setup _build -Db_sanitize=address,undefined -Dgir=disabled -Dapi_docs=disabled -Dinternal_tests=true -Dinternal_checks=true
+ASAN_OPTIONS=detect_leaks=0 meson compile -C _build
+ASAN_OPTIONS=detect_leaks=1 meson test -C _build --no-rebuild --suite leak-check --print-errorlogs --logbase leak-check
+```
+
+The list in `tests/meson.build` selects eight C test binaries. They cover
+app/common utilities, contexts, internal permissions, exports, instances,
+locales, portal helpers and refs. They do not need runtime repositories or
+sandboxed apps. They use no leak suppressions, including those in
+`tests/flatpak-asan.supp`.
+
+Meson fails when LeakSanitizer returns a nonzero exit status, even if all TAP
+assertions passed. LeakSanitizer writes reports to `_build/tests/asan_*.log.*`.
+CI uploads these reports and the Meson logs on failure.
+
+This suite replaces the disabled Valgrind CI job. That job used
+`FLATPAK_TESTS_VALGRIND`, which sets `--leak-check=no`. The full integration suite
+still runs with leak detection disabled and other ASan/UBSan checks enabled.
+Leak checks do not yet cover installation, transactions, authentication, the
+system helper or sandboxed apps. The portal tests terminate their daemon
+subprocesses, so they do not check daemon exit-time leaks.
+
+Before adding tests to `leak-check`, reproduce any leaks and fix ownership bugs.
+If an external library needs a suppression, document the allocation and why it
+cannot be freed. Do not suppress a whole library or allocator.
+
 ## Commit messages
 
 Start the subject with the affected component when practical, for example

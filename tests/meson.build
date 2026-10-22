@@ -133,6 +133,19 @@ c_tests = [
   ['test-ref-utils', {}],
 ]
 
+# These C tests do not need runtime repositories or sandboxed apps.
+# Exclude testlibrary because its installation and transaction tests need both.
+leak_check_tests = [
+  'testapp',
+  'testcommon',
+  'test-context',
+  'test-exports',
+  'test-instance',
+  'test-locale-utils',
+  'test-portal',
+  'test-ref-utils',
+]
+
 foreach testcase : c_tests
   name = testcase[0]
   options = testcase[1]
@@ -174,14 +187,20 @@ foreach testcase : c_tests
 
   lsan_log_path = ':log_path=' + meson.current_build_dir() / \
                   'asan_' + name.underscorify() + '.log'
-  test_env.set('LSAN_OPTIONS', lsan_options + lsan_log_path)
+  if name in leak_check_tests
+    # These tests must pass without the integration suite's suppressions.
+    test_env.set('LSAN_OPTIONS', 'exitcode=23' + lsan_log_path)
+  else
+    test_env.set('LSAN_OPTIONS', lsan_options + lsan_log_path)
+  endif
 
   if can_run_host_binaries
     test(
       name,
       tap_test,
       args : [exe],
-      depends : runtime_repo,
+      depends : name in leak_check_tests ? [] : [runtime_repo],
+      suite : name in leak_check_tests ? ['leak-check'] : [],
       env : test_env,
       protocol : 'tap',
       timeout : options.get('timeout', 30),

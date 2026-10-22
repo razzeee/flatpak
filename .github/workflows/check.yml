@@ -61,17 +61,28 @@ jobs:
       env:
         CFLAGS: -O2 -Wp,-D_FORTIFY_SOURCE=2
     - name: Build flatpak
+      id: build
       run: meson compile -C _build
       env:
-        ASAN_OPTIONS: detect_leaks=0 # Right now we're not fully clean, but this gets us use-after-free etc
+        ASAN_OPTIONS: detect_leaks=0 # The leak-check suite does not cover build-time helpers
     - name: Run tests
       run: meson test -C _build
       env:
-        ASAN_OPTIONS: detect_leaks=0 # Right now we're not fully clean, but this gets us use-after-free etc
+        ASAN_OPTIONS: detect_leaks=0 # Integration tests still leak. Keep other ASan/UBSan checks enabled.
+        LC_ALL: en_US.UTF-8
+    - name: Check unit tests for memory leaks
+      # Reuse the sanitizer build and save logs separately from the full test run.
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      timeout-minutes: 5
+      run: meson test -C _build --no-rebuild --suite leak-check --print-errorlogs --logbase leak-check
+      env:
+        ASAN_OPTIONS: detect_leaks=1
         LC_ALL: en_US.UTF-8
     - name: Collect logs on failure
       if: failure() || cancelled()
-      run: mv _build/meson-logs/* test-logs/ || true
+      run: |
+        cp -a _build/meson-logs/. test-logs/ || true
+        cp _build/tests/asan_*.log* test-logs/ || true
     - name: Upload test logs
       uses: actions/upload-artifact@v7
       if: failure() || cancelled()
@@ -196,55 +207,6 @@ jobs:
         name: docs
         path: |
           _build/doc/
-
-  valgrind:
-    name: Run tests in valgrind
-    needs: check # Don't run expensive test if main check fails
-    runs-on: ubuntu-24.04 # Might as well test with a different one too
-    if: ${{ false }} # Currently Valgrind takes too long and always fails
-    steps:
-    - name: Install Dependencies
-      run: |
-        sudo add-apt-repository ppa:flatpak/stable
-        sudo apt-get update
-        sudo apt-get install -y libglib2.0-dev attr gettext bison dbus gi-docgen \
-        libfuse-dev ostree libostree-dev libarchive-dev libzstd-dev libcap-dev libattr1-dev libdw-dev libelf-dev python3-pyparsing \
-        libjson-glib-dev shared-mime-info desktop-file-utils libpolkit-agent-1-dev libpolkit-gobject-1-dev \
-        libseccomp-dev libcurl4-openssl-dev libsystemd-dev libxml2-utils libgpgme11-dev gobject-introspection \
-        libgirepository1.0-dev libappstream-dev libdconf-dev clang socat meson libdbus-1-dev \
-        valgrind e2fslibs-dev meson libxau-dev libgdk-pixbuf2.0-dev libc6-dev
-    - name: Check out flatpak
-      uses: actions/checkout@v6
-      with:
-        submodules: true
-    - name: Create logs dir
-      run: mkdir test-logs
-    - name: Configure
-      run: |
-        meson setup \
-          -Dgir=enabled \
-          -Dapi_docs=enabled \
-          _build
-      env:
-        CFLAGS: -O2
-    - name: Build flatpak
-      run: meson compile -C _build
-    - name: Run tests under valgrind
-      run: meson test -C _build
-      env:
-        FLATPAK_TESTS_VALGRIND: true
-    - name: Collect overall test logs on failure
-      if: failure()
-      run: mv _build/meson-logs/* test-logs/ || true
-    - name: Collect individual test logs on cancel
-      if: failure() || cancelled()
-      run: mv _build/tests/*.log test-logs/ || true
-    - name: Upload test logs
-      uses: actions/upload-artifact@v7
-      if: failure() || cancelled()
-      with:
-        name: test logs
-        path: test-logs
 
   # This is a workaround to CodeQL not reporting status to the
   # merge queue.
