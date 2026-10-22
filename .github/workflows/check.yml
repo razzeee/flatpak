@@ -18,8 +18,16 @@ permissions:
 
 jobs:
   check:
-    name: Build with gcc and test
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - mode: sanitizers
+          name: Build with gcc and test
+        - mode: coverage
+          name: Measure gcc test coverage
     steps:
     - name: Install Dependencies
       run: |
@@ -40,6 +48,9 @@ jobs:
         meson ninja-build libyaml-dev libstemmer-dev gperf itstool libmalcontent-0-dev libxau-dev libgdk-pixbuf2.0-dev openssl libc6-dev
         # One of the tests wants this
         sudo mkdir /tmp/flatpak-com.example.App-OwnedByRoot
+    - name: Install coverage tools
+      if: matrix.mode == 'coverage'
+      run: sudo apt-get install -y gcovr
     - name: Check out flatpak
       uses: actions/checkout@v6
       with:
@@ -47,6 +58,7 @@ jobs:
     - name: Create logs dir
       run: mkdir test-logs
     - name: configure
+      if: matrix.mode == 'sanitizers'
       # We don't do api-docs or GObject-Introspection here, because they can
       # clash with AddressSanitizer. Instead, the clang build enables those.
       run: |
@@ -60,21 +72,72 @@ jobs:
           _build
       env:
         CFLAGS: -O2 -Wp,-D_FORTIFY_SOURCE=2
+    - name: Configure coverage
+      if: matrix.mode == 'coverage'
+      run: |
+        meson setup \
+          --buildtype=debug \
+          -Db_coverage=true \
+          -Dgir=disabled \
+          -Dapi_docs=disabled \
+          -Dinternal_checks=true \
+          -Dinternal_tests=true \
+          -Dsystem_dbus_proxy=xdg-dbus-proxy \
+          _build
+      env:
+        CC: gcc
+        CFLAGS: -fprofile-update=atomic
     - name: Build flatpak
       run: meson compile -C _build
       env:
         ASAN_OPTIONS: detect_leaks=0 # Right now we're not fully clean, but this gets us use-after-free etc
+    - name: Prepare coverage counters
+      if: matrix.mode == 'coverage'
+      # Fixture creation runs flatpak, so reset counters afterward.
+      run: |
+        meson compile -C _build runtime-repo
+        find _build -name '*.gcda' -delete
     - name: Run tests
+      id: tests
       run: meson test -C _build
       env:
         ASAN_OPTIONS: detect_leaks=0 # Right now we're not fully clean, but this gets us use-after-free etc
         LC_ALL: en_US.UTF-8
+    - name: Generate coverage reports
+      if: ${{ !cancelled() && matrix.mode == 'coverage' && steps.tests.outcome != 'skipped' }}
+      shell: bash
+      # Include counters from integration test subprocesses.
+      # Keep .gcno files so unexecuted code counts toward the total.
+      run: |
+        mkdir -p _build/coverage
+        gcovr --root . \
+          --exclude 'tests/' --exclude 'subprojects/' --exclude '_build/' \
+          --html-details _build/coverage/index.html \
+          --xml-pretty --xml _build/coverage/coverage.xml \
+          --txt _build/coverage/coverage.txt \
+          --print-summary _build | tee _build/coverage/summary.txt
+        {
+          echo '### GCC test coverage (lines and branches)'
+          echo 'Test outcome: ${{ steps.tests.outcome }}. Failed tests produce partial coverage.'
+          echo '```text'
+          cat _build/coverage/summary.txt
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+    - name: Upload coverage reports and test logs
+      uses: actions/upload-artifact@v7
+      if: ${{ !cancelled() && matrix.mode == 'coverage' }}
+      with:
+        name: coverage
+        path: |
+          _build/coverage/
+          _build/meson-logs/
+        if-no-files-found: error
     - name: Collect logs on failure
-      if: failure() || cancelled()
+      if: (failure() || cancelled()) && matrix.mode == 'sanitizers'
       run: mv _build/meson-logs/* test-logs/ || true
     - name: Upload test logs
       uses: actions/upload-artifact@v7
-      if: failure() || cancelled()
+      if: (failure() || cancelled()) && matrix.mode == 'sanitizers'
       with:
         name: test logs
         path: test-logs

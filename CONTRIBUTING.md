@@ -57,6 +57,57 @@ working on. This can be accomplished with a command like:
 meson test -C _build test-info@user.wrap test-info@system.wrap
 ```
 
+## Measuring test coverage
+
+The GCC coverage job in `.github/workflows/check.yml` runs the Meson C and
+shell integration tests with `-Db_coverage=true`. It runs separately from the
+sanitizer job and reports line and branch coverage without a minimum threshold.
+Download the `coverage` artifact and open `coverage/index.html` to see coverage
+for each source file. The artifact also contains Cobertura XML, a text report,
+a summary, and Meson test logs. Failed test runs produce partial reports.
+
+To run this locally, install the build and test dependencies, GCC, and a
+matching version of gcov. Use a gcovr version that supports your GCC version.
+Ubuntu 24.04 CI uses its packaged gcovr 7.0. Local verification with GCC 16
+required gcovr 8.7.
+
+```sh
+CC=gcc CFLAGS=-fprofile-update=atomic meson setup --buildtype=debug \
+  -Db_coverage=true -Dgir=disabled -Dapi_docs=disabled \
+  -Dinternal_checks=true -Dinternal_tests=true \
+  -Dsystem_dbus_proxy=xdg-dbus-proxy _build-coverage
+meson compile -C _build-coverage
+meson compile -C _build-coverage runtime-repo
+find _build-coverage -name '*.gcda' -delete
+LC_ALL=en_US.UTF-8 meson test -C _build-coverage
+mkdir -p _build-coverage/coverage
+gcovr --root . --exclude 'tests/' --exclude 'subprojects/' \
+  --exclude '_build-coverage/' \
+  --html-details _build-coverage/coverage/index.html \
+  --xml-pretty --xml _build-coverage/coverage/coverage.xml \
+  --txt _build-coverage/coverage/coverage.txt \
+  --print-summary _build-coverage
+```
+
+Use a fresh build directory. Fixture generation runs Flatpak, so reset counters
+after building `runtime-repo`. gcovr scans the build tree for counters from the
+CLI, libraries, and helpers that integration tests run. It uses `.gcno` files
+to include compiled code that no test executed. The report excludes test
+sources, vendored subprojects, and generated sources in the build directory.
+Atomic updates prevent threads from losing counter increments. GCC uses file
+locking to merge counters from processes that exit normally.
+
+The results cover only this build configuration and the tests that ran.
+Processes may not save counters if a test kills them or if their sandbox or
+user permissions prevent writes to the build tree. This can leave gaps in
+service and helper coverage.
+
+Integration tests need working user namespaces, D-Bus, and the runtime
+dependencies listed in CI. See the workflow for dependency and AppArmor setup.
+If local restrictions prevent tests from running, list the skipped or failed
+tests with your coverage results. A unit-only run does not measure the same
+code paths as CI.
+
 ## Commit messages
 
 Start the subject with the affected component when practical, for example
