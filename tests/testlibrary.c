@@ -3979,6 +3979,158 @@ test_transaction_deps (void)
   g_assert_error (error, FLATPAK_ERROR, FLATPAK_ERROR_ABORTED);
 }
 
+/* Rebasing an installed, unchanged app must still record its previous IDs. */
+static void
+test_transaction_rebase_unchanged (gconstpointer data)
+{
+  gboolean system = (GPOINTER_TO_INT (data) & 1) != 0;
+  gboolean masked = (GPOINTER_TO_INT (data) & 2) != 0;
+  gboolean res;
+  g_autoptr(FlatpakInstallation) inst = NULL;
+  g_autoptr(FlatpakTransaction) transaction = NULL;
+  g_autoptr(FlatpakInstalledRef) installed = NULL;
+  g_autoptr(GError) error = NULL;
+  g_autofree char *app = g_strdup_printf ("app/org.test.Hello/%s/master",
+                                         flatpak_get_default_arch ());
+  g_autoptr(GFile) deploy_file = NULL;
+  g_autoptr(GBytes) original_deploy = NULL;
+  g_autofree char *app_data = g_build_filename (g_get_home_dir (), ".var", "app", "org.test.Hello", NULL);
+  g_autofree char *old_app_data = g_build_filename (g_get_home_dir (), ".var", "app",
+                                                   "org.test.PreviousHello", NULL);
+  g_autofree char *old_data = g_build_filename (old_app_data, "data", NULL);
+  g_autofree char *marker = g_build_filename (old_data, "rebase-marker", NULL);
+  g_autofree char *portal_dir = g_build_filename (g_get_user_data_dir (), "xdg-desktop-portal", "applications", NULL);
+  g_autofree char *applications_dir = g_build_filename (g_get_user_data_dir (), "applications", NULL);
+  g_autofree char *old_launcher = g_build_filename (portal_dir, "org.test.PreviousHello.rebase.desktop", NULL);
+  g_autofree char *new_launcher = g_build_filename (portal_dir, "org.test.Hello.rebase.desktop", NULL);
+  g_autofree char *old_link = g_build_filename (applications_dir, "org.test.PreviousHello.rebase.desktop", NULL);
+  g_autofree char *new_link = g_build_filename (applications_dir, "org.test.Hello.rebase.desktop", NULL);
+  const char *previous_ids[] = { "org.test.PreviousHello", NULL };
+  const char *more_ids[] = { "org.test.AnotherPreviousHello", NULL };
+  char *launch[] = { "flatpak", "run", "--user", "--command=bash", "org.test.Hello",
+                     "-c", "test \"$(cat \"$XDG_DATA_HOME/rebase-marker\")\" = migrated", NULL };
+
+  if (system)
+    {
+      g_autoptr(FlatpakRemote) remote = NULL;
+
+      inst = flatpak_installation_new_system (NULL, &error);
+      g_assert_no_error (error);
+      launch[2] = "--system";
+      remote = flatpak_installation_get_remote_by_name (inst, repo_name, NULL, &error);
+      if (remote == NULL)
+        {
+          g_assert_error (error, FLATPAK_ERROR, FLATPAK_ERROR_REMOTE_NOT_FOUND);
+          g_clear_error (&error);
+          add_remote_system ("test", NULL);
+        }
+    }
+  else
+    inst = flatpak_installation_new_user (NULL, &error);
+  g_assert_no_error (error);
+  empty_installation (inst);
+  transaction = flatpak_transaction_new_for_installation (inst, NULL, &error);
+  g_assert_no_error (error);
+  g_assert_true (flatpak_transaction_add_install (transaction, repo_name, app, NULL, &error));
+  g_assert_no_error (error);
+  res = flatpak_transaction_run (transaction, NULL, &error);
+  g_assert_no_error (error);
+  g_assert_true (res);
+
+  installed = flatpak_installation_get_installed_ref (inst, FLATPAK_REF_KIND_APP,
+                                                      "org.test.Hello", NULL, "master", NULL, &error);
+  g_assert_no_error (error);
+  deploy_file = g_file_new_build_filename (flatpak_installed_ref_get_deploy_dir (installed), "deploy", NULL);
+  original_deploy = g_file_load_bytes (deploy_file, NULL, NULL, &error);
+  g_assert_no_error (error);
+
+  if (masked)
+    {
+      char *download[] = { "flatpak", "update", system ? "--system" : "--user",
+                            "--noninteractive", "--no-deploy", "org.test.Hello", NULL };
+      char *mask[] = { "flatpak", "mask", system ? "--system" : "--user", app, NULL };
+
+      update_test_app ();
+      update_repo ("test");
+      /* Stage the new commit too: the system helper must not deploy the local
+       * repository tip instead of updating the masked, active deployment. */
+      run_test_subprocess (download, RUN_TEST_SUBPROCESS_DEFAULT);
+      run_test_subprocess (mask, RUN_TEST_SUBPROCESS_DEFAULT);
+    }
+
+  g_assert_cmpint (g_mkdir_with_parents (portal_dir, 0700), ==, 0);
+  g_assert_cmpint (g_mkdir_with_parents (applications_dir, 0700), ==, 0);
+  g_assert_true (g_file_set_contents (old_launcher,
+                                     "[Desktop Entry]\nType=Application\nName=Rebase test\n"
+                                     "Exec=flatpak run org.test.PreviousHello\n"
+                                     "X-Flatpak=org.test.PreviousHello\n", -1, &error));
+  g_assert_no_error (error);
+  g_assert_cmpint (symlink (old_launcher, old_link), ==, 0);
+
+  /* Download-only must not change deployment metadata. Then check a real
+   * rebase, a repeated rebase, and accumulation of another previous ID. */
+  for (size_t i = 0; i < 4; i++)
+    {
+      g_autoptr(FlatpakInstalledRef) current = NULL;
+
+      g_clear_object (&transaction);
+      transaction = flatpak_transaction_new_for_installation (inst, NULL, &error);
+      g_assert_no_error (error);
+      flatpak_transaction_set_no_deploy (transaction, i == 0);
+      g_assert_true (flatpak_transaction_add_rebase (transaction, repo_name, app, NULL,
+                                                     i == 3 ? more_ids : previous_ids, &error));
+      g_assert_no_error (error);
+      g_assert_true (flatpak_transaction_run (transaction, NULL, &error));
+      g_assert_no_error (error);
+      current = flatpak_installation_get_installed_ref (inst, FLATPAK_REF_KIND_APP,
+                                                        "org.test.Hello", NULL, "master", NULL, &error);
+      g_assert_no_error (error);
+      g_assert_cmpstr (flatpak_ref_get_commit (FLATPAK_REF (current)), ==,
+                      flatpak_ref_get_commit (FLATPAK_REF (installed)));
+      if (i == 0)
+        {
+          g_autoptr(GBytes) unchanged_deploy = g_file_load_bytes (deploy_file, NULL, NULL, &error);
+
+          g_assert_no_error (error);
+          g_assert_true (g_bytes_equal (original_deploy, unchanged_deploy));
+          g_assert_true (g_file_test (old_launcher, G_FILE_TEST_EXISTS));
+          g_assert_true (g_file_test (old_link, G_FILE_TEST_IS_SYMLINK));
+          g_assert_false (g_file_test (new_launcher, G_FILE_TEST_EXISTS));
+        }
+      else
+        {
+          g_assert_false (g_file_test (old_launcher, G_FILE_TEST_EXISTS));
+          g_assert_true (g_file_test (new_launcher, G_FILE_TEST_EXISTS));
+        }
+    }
+
+  /* Launch for the first time only after the rebase: migration must move real
+   * data, not merely report a successful transaction. */
+  g_assert_true (glnx_shutil_rm_rf_at (AT_FDCWD, app_data, NULL, &error));
+  g_assert_no_error (error);
+  g_assert_cmpint (g_mkdir_with_parents (old_data, 0700), ==, 0);
+  g_assert_true (g_file_set_contents (marker, "migrated", -1, &error));
+  g_assert_no_error (error);
+  run_test_subprocess (launch, RUN_TEST_SUBPROCESS_DEFAULT);
+
+  g_assert_cmpint (unlink (new_launcher), ==, 0);
+  g_assert_cmpint (unlink (new_link), ==, 0);
+  if (masked)
+    {
+      char *unmask[] = { "flatpak", "mask", system ? "--system" : "--user", "--remove", app, NULL };
+      char *restore[] = { "ostree", "--repo=repos/test", "reset", app,
+                           (char *) flatpak_ref_get_commit (FLATPAK_REF (installed)), NULL };
+      run_test_subprocess (unmask, RUN_TEST_SUBPROCESS_DEFAULT);
+      run_test_subprocess (restore, RUN_TEST_SUBPROCESS_DEFAULT);
+      update_repo ("test");
+    }
+  empty_installation (inst);
+  g_assert_true (glnx_shutil_rm_rf_at (AT_FDCWD, app_data, NULL, &error));
+  g_assert_no_error (error);
+  g_assert_true (glnx_shutil_rm_rf_at (AT_FDCWD, old_app_data, NULL, &error));
+  g_assert_no_error (error);
+}
+
 /* install from a local repository */
 static void
 test_transaction_install_local (void)
@@ -5212,6 +5364,10 @@ main (int argc, char *argv[])
   g_test_add_func ("/library/transaction-flatpakref-origin-remote-creation", test_transaction_flatpakref_origin_remote_creation);
   g_test_add_func ("/library/transaction-deps", test_transaction_deps);
   g_test_add_func ("/library/transaction-install-local", test_transaction_install_local);
+  g_test_add_data_func ("/library/transaction-rebase-unchanged/user", GINT_TO_POINTER (FALSE), test_transaction_rebase_unchanged);
+  g_test_add_data_func ("/library/transaction-rebase-unchanged/system", GINT_TO_POINTER (TRUE), test_transaction_rebase_unchanged);
+  g_test_add_data_func ("/library/transaction-rebase-unchanged/masked-user", GINT_TO_POINTER (2), test_transaction_rebase_unchanged);
+  g_test_add_data_func ("/library/transaction-rebase-unchanged/masked-system", GINT_TO_POINTER (3), test_transaction_rebase_unchanged);
   g_test_add_func ("/library/transaction-app-runtime-same-remote", test_transaction_app_runtime_same_remote);
   g_test_add_func ("/library/transaction-update-related-from-different-remote", test_transaction_update_related_from_different_remote);
   g_test_add_func ("/library/remote-nodeps-option", test_remote_nodeps_option);

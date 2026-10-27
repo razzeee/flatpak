@@ -3838,6 +3838,30 @@ resolve_ops (FlatpakTransaction *self,
           continue;
         }
 
+      /* A rebase of a masked app may record previous IDs, but must use the
+       * installed commit and its dependencies, not the remote's newer tip. */
+      if (op->previous_ids != NULL &&
+          flatpak_dir_ref_is_masked (priv->dir, flatpak_decomposed_get_ref (op->ref)))
+        {
+          g_autoptr(GBytes) deploy_data = NULL;
+
+          if (dir_ref_is_installed (priv->dir, op->ref, NULL, &deploy_data))
+            {
+              g_autofree const char **subpaths = flatpak_deploy_data_get_subpaths (deploy_data);
+
+              metadata_bytes = load_deployed_metadata (self, op->ref, &checksum, NULL);
+              if (metadata_bytes == NULL)
+                return flatpak_fail (error, "Unable to load deployed metadata for %s",
+                                     flatpak_decomposed_get_ref (op->ref));
+              g_strfreev (op->subpaths);
+              op->subpaths = g_strdupv ((char **) subpaths);
+              if (!mark_op_resolved (op, checksum, NULL, NULL, metadata_bytes, NULL, error))
+                return FALSE;
+              priv->max_op = MAX (priv->max_op, flatpak_decomposed_is_app (op->ref) ? APP_UPDATE : RUNTIME_UPDATE);
+              continue;
+            }
+        }
+
       /* op->kind is INSTALL or UPDATE */
 
       if (flatpak_decomposed_is_app (op->ref))
@@ -5191,7 +5215,8 @@ _run_op_kind (FlatpakTransaction           *self,
     {
       g_assert (op->resolved_commit != NULL); /* We resolved this before */
 
-      if (flatpak_dir_needs_update_for_commit_and_subpaths (priv->dir, op->remote, op->ref,
+      if (op->update_only_deploy ||
+          flatpak_dir_needs_update_for_commit_and_subpaths (priv->dir, op->remote, op->ref,
                                                             op->resolved_commit, (const char **) op->subpaths))
         {
           g_autoptr(FlatpakTransactionProgress) progress = flatpak_transaction_progress_new ();
@@ -5203,15 +5228,11 @@ _run_op_kind (FlatpakTransaction           *self,
           if (op->resolved_metakey && !flatpak_check_required_version (flatpak_decomposed_get_ref (op->ref),
                                                                        op->resolved_metakey, &local_error))
             res = FALSE;
-          else if (op->update_only_deploy)
-            res = flatpak_dir_deploy_update (priv->dir, op->ref,
-                                             op->resolved_commit,
-                                             (const char **) op->subpaths,
-                                             (const char **) op->previous_ids,
-                                             cancellable, &local_error);
           else
+            /* Metadata-only rebases still need the system helper and must
+             * respect no_deploy, just like updates with a new commit. */
             res = flatpak_dir_update (priv->dir,
-                                      priv->no_pull,
+                                      priv->no_pull || op->update_only_deploy,
                                       priv->no_deploy,
                                       priv->disable_static_deltas,
                                       op->commit != NULL, /* Allow downgrade if we specify commit */

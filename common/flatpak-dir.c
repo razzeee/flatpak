@@ -10722,6 +10722,16 @@ flatpak_dir_deploy_update (FlatpakDir        *self,
   old_origin = flatpak_deploy_data_get_origin (old_deploy_data);
   old_subpaths = flatpak_deploy_data_get_subpaths (old_deploy_data);
 
+  /* The system helper resolves updates from the local repository tip. For a
+   * masked rebase that tip may already contain a downloaded newer version;
+   * only the active deployment's previous IDs should change. */
+  if (opt_previous_ids != NULL && opt_previous_ids[0] != NULL &&
+      flatpak_dir_ref_is_masked (self, flatpak_decomposed_get_ref (ref)))
+    {
+      checksum_or_latest = flatpak_deploy_data_get_commit (old_deploy_data);
+      opt_subpaths = old_subpaths;
+    }
+
   previous_ids = flatpak_deploy_data_get_previous_ids (old_deploy_data, NULL);
   if (opt_previous_ids)
     {
@@ -10730,6 +10740,50 @@ flatpak_dir_deploy_update (FlatpakDir        *self,
     }
   else
     previous_ids_owned = g_strdupv ((char **) previous_ids);
+
+  /* A rebase can add previous IDs without changing the checkout. In that case
+   * update the deployment metadata under the installation lock instead of
+   * trying to deploy the same commit again (or removing the active checkout). */
+  if (opt_previous_ids != NULL && opt_previous_ids[0] != NULL)
+    {
+      g_autofree char *latest = NULL;
+      const char *checksum = checksum_or_latest;
+
+      if (checksum == NULL)
+        {
+          latest = flatpak_dir_read_latest (self, old_origin, flatpak_decomposed_get_ref (ref),
+                                            NULL, cancellable, error);
+          if (latest == NULL)
+            return FALSE;
+          checksum = latest;
+        }
+
+      if (g_str_equal (checksum, flatpak_deploy_data_get_commit (old_deploy_data)) &&
+          (opt_subpaths == NULL || g_strv_equal (opt_subpaths, old_subpaths)))
+        {
+          VarDeployDataRef deploy_ref = var_deploy_data_from_bytes (old_deploy_data);
+          g_autoptr(GVariant) metadata = g_variant_ref_sink (var_metadata_peek_as_gvariant (var_deploy_data_get_metadata (deploy_ref)));
+          g_auto(GVariantDict) dict = FLATPAK_VARIANT_DICT_INITIALIZER;
+          g_autoptr(GVariant) updated = NULL;
+          g_autoptr(GBytes) bytes = NULL;
+          g_autoptr(GFile) deploy_base = flatpak_dir_get_deploy_dir (self, ref);
+          g_autoptr(GFile) deploy_dir = g_file_get_child (deploy_base, old_active);
+          g_autoptr(GFile) deploy_file = g_file_get_child (deploy_dir, "deploy");
+
+          g_variant_dict_init (&dict, metadata);
+          g_variant_dict_insert_value (&dict, "previous-ids",
+                                        g_variant_new_strv ((const char * const *) previous_ids_owned, -1));
+          updated = g_variant_ref_sink (g_variant_new ("(ss^ast@a{sv})",
+                                                       old_origin, checksum, old_subpaths,
+                                                       GUINT64_TO_BE (flatpak_deploy_data_get_installed_size (old_deploy_data)),
+                                                       g_variant_dict_end (&dict)));
+          bytes = g_variant_get_data_as_bytes (updated);
+          if (!flatpak_bytes_save (deploy_file, bytes, cancellable, error))
+            return FALSE;
+
+          goto updated;
+        }
+    }
 
   if (!flatpak_dir_deploy (self,
                            old_origin,
@@ -10747,6 +10801,7 @@ flatpak_dir_deploy_update (FlatpakDir        *self,
                              cancellable, error))
     return FALSE;
 
+updated:
   if (flatpak_decomposed_is_app (ref))
     {
       g_autofree char *id = flatpak_decomposed_dup_id (ref);
@@ -12219,7 +12274,7 @@ flatpak_dir_update (FlatpakDir                           *self,
        * xdg-desktop-portal. This has to be done as the user so can't be in the
        * system helper.
        */
-      if (opt_previous_ids)
+      if (!no_deploy && opt_previous_ids)
         rewrite_dynamic_launchers (ref, opt_previous_ids);
 
       return TRUE;
