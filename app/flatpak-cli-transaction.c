@@ -291,7 +291,8 @@ progress_changed_cb (FlatpakTransactionProgress *progress,
     "▊",
     "▉",
   };
-  const char *full_block = "█";
+  gboolean fancy = flatpak_fancy_output ();
+  const char *full_block = fancy ? " " : "█";
 
   guint percent = flatpak_transaction_progress_get_progress (progress);
   guint64 start_time = flatpak_transaction_progress_get_start_time (progress);
@@ -325,20 +326,20 @@ progress_changed_cb (FlatpakTransactionProgress *progress,
   g_string_append (str, cli->progress_msg);
   g_string_append (str, " ");
 
-  if (flatpak_fancy_output ())
-    g_string_append (str, FLATPAK_ANSI_FAINT_ON);
+  if (fancy && n_full > 0)
+    g_string_append (str, FLATPAK_ANSI_REVERSE_ON);
 
   for (i = 0; i < n_full; i++)
     g_string_append (str, full_block);
+
+  if (fancy && n_full > 0)
+    g_string_append (str, FLATPAK_ANSI_REVERSE_OFF);
 
   if (i < bar_length)
     {
       g_string_append (str, partial_blocks[partial]);
       i++;
     }
-
-  if (flatpak_fancy_output ())
-    g_string_append (str, FLATPAK_ANSI_FAINT_OFF);
 
   for (; i < bar_length; i++)
     g_string_append (str, " ");
@@ -351,7 +352,7 @@ progress_changed_cb (FlatpakTransactionProgress *progress,
   if (speed)
     g_string_append_printf (str, "  %s", speed);
 
-  if (flatpak_fancy_output ())
+  if (fancy)
     {
       flatpak_table_printer_set_cell (cli->printer, cli->progress_row, 0, str->str);
       if (flatpak_transaction_operation_get_operation_type (op) != FLATPAK_TRANSACTION_OPERATION_UNINSTALL)

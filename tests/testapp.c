@@ -301,6 +301,13 @@ static EllipsizeData ellipsize[] = {
 };
 
 static void
+test_progress_bar_width (void)
+{
+  g_assert_cmpint (cell_width (FLATPAK_ANSI_REVERSE_ON "        "
+                               FLATPAK_ANSI_REVERSE_OFF "▌ "), ==, 10);
+}
+
+static void
 test_string_ellipsize (void)
 {
   gsize idx;
@@ -697,6 +704,7 @@ main (int argc, char *argv[])
   g_test_add_func ("/app/number-prompt", test_number_prompt);
   g_test_add_func ("/app/parse-datetime", test_parse_datetime);
   g_test_add_func ("/app/parse-numbers", test_parse_numbers);
+  g_test_add_func ("/app/progress-bar-width", test_progress_bar_width);
   g_test_add_func ("/app/string-ellipsize", test_string_ellipsize);
   g_test_add_func ("/app/table", test_table);
   g_test_add_func ("/app/table-decimal", test_table_decimal);

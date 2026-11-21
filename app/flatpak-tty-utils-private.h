@@ -28,6 +28,8 @@
 #define FLATPAK_ANSI_BOLD_OFF "\x1b[22m"
 #define FLATPAK_ANSI_FAINT_ON "\x1b[2m"
 #define FLATPAK_ANSI_FAINT_OFF "\x1b[22m"
+#define FLATPAK_ANSI_REVERSE_ON "\x1b[7m"
+#define FLATPAK_ANSI_REVERSE_OFF "\x1b[27m"
 #define FLATPAK_ANSI_RED "\x1b[31m"
 #define FLATPAK_ANSI_GREEN "\x1b[32m"
 #define FLATPAK_ANSI_COLOR_RESET "\x1b[0m"

@@ -1236,6 +1236,10 @@ skip_escape_sequence (const char *p)
     p += strlen (FLATPAK_ANSI_FAINT_ON);
   else if (g_str_has_prefix (p, FLATPAK_ANSI_FAINT_OFF))
     p += strlen (FLATPAK_ANSI_FAINT_OFF);
+  else if (g_str_has_prefix (p, FLATPAK_ANSI_REVERSE_ON))
+    p += strlen (FLATPAK_ANSI_REVERSE_ON);
+  else if (g_str_has_prefix (p, FLATPAK_ANSI_REVERSE_OFF))
+    p += strlen (FLATPAK_ANSI_REVERSE_OFF);
   else if (g_str_has_prefix (p, FLATPAK_ANSI_RED))
     p += strlen (FLATPAK_ANSI_RED);
   else if (g_str_has_prefix (p, FLATPAK_ANSI_GREEN))
