@@ -220,10 +220,17 @@ gboolean flatpak_rm_rf (GFile        *dir,
                         GCancellable *cancellable,
                         GError      **error);
 
+typedef enum
+{
+  FLATPAK_SETID_NORMALIZE,
+  FLATPAK_SETID_REJECT,
+} FlatpakSetidPolicy;
+
 gboolean flatpak_canonicalize_permissions (int         parent_dfd,
                                            const char *rel_path,
                                            int         uid,
                                            int         gid,
+                                           FlatpakSetidPolicy setid_policy,
                                            GError    **error);
 
 gboolean flatpak_file_rename (GFile        *from,

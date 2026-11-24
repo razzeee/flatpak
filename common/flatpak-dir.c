@@ -9831,6 +9831,7 @@ apply_extra_data (FlatpakDir   *self,
   if (!flatpak_canonicalize_permissions (app_files_dfd, "extra",
                                          getuid () == 0 ? 0 : -1,
                                          getuid () == 0 ? 0 : -1,
+                                         FLATPAK_SETID_REJECT,
                                          error))
     return FALSE;
 

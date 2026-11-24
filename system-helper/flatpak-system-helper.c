@@ -433,6 +433,7 @@ handle_deploy (FlatpakSystemHelper   *object,
                                                  arg_repo_path,
                                                  getuid() == 0 ? 0 : -1,
                                                  getuid() == 0 ? 0 : -1,
+                                                 FLATPAK_SETID_NORMALIZE,
                                                  &local_error))
             {
               g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,

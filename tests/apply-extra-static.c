@@ -22,12 +22,12 @@ int main(void) {
     if (dfd < 0)
         err (1, "open /app/extra");
 
-    exe_fd = openat (dfd, "exe", O_CLOEXEC | O_CREAT | O_EXCL | O_RDWR, 02744);
+    exe_fd = openat (dfd, "exe", O_CLOEXEC | O_CREAT | O_EXCL | O_RDWR, 0744);
 
     if (exe_fd < 0)
         err (1, "openat /app/extra/exe");
 
-    if (fchmod (exe_fd, 06744) < 0)
+    if (access ("/app/setid-output", F_OK) == 0 && fchmod (exe_fd, 06744) < 0)
         err (1, "fchmod /app/extra/exe");
 
     if (close (exe_fd) < 0)

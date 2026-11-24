@@ -14,6 +14,46 @@
 #include "flatpak-run-x11-private.h"
 
 static void
+test_canonicalize_setid (void)
+{
+  const char *names[] = { "setuid", "setgid", "data" };
+  const mode_t input[] = { 04700, 02600, 0600 };
+  const mode_t expected[] = { 0755, 0644, 0644 };
+  g_autofree char *template = g_build_filename (g_get_tmp_dir (), "flatpak-test-XXXXXX", NULL);
+  g_auto(GLnxTmpDir) dir = { 0, };
+  g_autoptr(GError) error = NULL;
+  struct stat st;
+
+  g_assert_true (glnx_mkdtempat (AT_FDCWD, template, 0700, &dir, &error));
+  for (size_t i = 0; i < G_N_ELEMENTS (names); i++)
+    {
+      glnx_autofd int fd = openat (dir.fd, names[i], O_CREAT | O_EXCL | O_WRONLY, 0600);
+
+      g_assert_cmpint (fd, >=, 0);
+      g_assert_cmpint (fchmod (fd, input[i]), ==, 0);
+    }
+
+  if (geteuid () != 0)
+    {
+      /* Changing ownership fails, but must not hide the setid diagnostic. */
+      g_assert_false (flatpak_canonicalize_permissions (dir.fd, "setuid", 0, -1,
+                                                        FLATPAK_SETID_REJECT, &error));
+      g_assert_error (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED);
+      g_assert_nonnull (strstr (error->message, "setuid or setgid"));
+      g_clear_error (&error);
+    }
+
+  g_assert_false (flatpak_canonicalize_permissions (dir.fd, ".", -1, -1,
+                                                    FLATPAK_SETID_REJECT, &error));
+  g_assert_error (error, G_IO_ERROR, G_IO_ERROR_FAILED);
+  for (size_t i = 0; i < G_N_ELEMENTS (names); i++)
+    {
+      g_assert_cmpint (fstatat (dir.fd, names[i], &st, 0), ==, 0);
+      g_assert_cmpuint (st.st_mode & 07777, ==, expected[i]);
+    }
+}
+
+static void
 test_has_path_prefix (void)
 {
   g_assert_true (flatpak_has_path_prefix ("/a/prefix/foo/bar", "/a/prefix"));
@@ -1494,6 +1534,7 @@ main (int argc, char *argv[])
   g_test_init (&argc, &argv, NULL);
 
   g_test_add_func ("/common/has-path-prefix", test_has_path_prefix);
+  g_test_add_func ("/common/canonicalize-setid", test_canonicalize_setid);
   g_test_add_func ("/common/path-match-prefix", test_path_match_prefix);
   g_test_add_func ("/common/arches", test_arches);
   g_test_add_func ("/common/extension-matches", test_extension_matches);

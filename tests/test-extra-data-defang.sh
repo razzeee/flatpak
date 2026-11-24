@@ -87,32 +87,15 @@ if test -f "${G_TEST_BUILDDIR}/apply-extra-deeply-nested-setuid"; then
     update_repo "${REPONAME}" "${COLLECTION_ID}"
 
     if flatpak_maybe_user install --or-update -y "${REPONAME}-repo" org.test.ExtraDataNoRuntime "${BRANCH}" >&2; then
-        DEPLOY_DIR="$(flatpak_maybe_user info --show-location org.test.ExtraDataNoRuntime)"
-        ( find "${DEPLOY_DIR}/files/extra" -not -type d -ls || true ) | sed -e 's/^/# /' >&2
-
-        # There must not be any setuid or setgid files in the deploy dir
-        find "${DEPLOY_DIR}/files/extra" -type f -perm -4000 > setuid-files
-        assert_not_file_has_content setuid-files .
-        find "${DEPLOY_DIR}/files/extra" -type f -perm -2000 > setgid-files
-        assert_not_file_has_content setgid-files .
-
-        # `flatpak uninstall` won't necessarily be able to recover by
-        # deleting the directory that was so deeply nested, because the
-        # directory is also so deeply nested that we run out of fd limit
-        # while removing it
-        rm -fr "${DEPLOY_DIR}/files/extra"
-
-        flatpak_maybe_user uninstall -y org.test.ExtraDataNoRuntime >&2
-
-        ok "extra-data app with deeply nested setuid binary was disarmed"
+        assert_not_reached "installed an extra data app with deeply nested setid output"
     else
         app_dir="${FL_DIR}/app/org.test.ExtraDataNoRuntime"
-        find "${app_dir}" -not -type d -ls | sed -e 's/^/# /' >&2
 
         # This filename pattern needs to be kept in sync with the
         # choice of deploy directory mkdtempat template in
         # flatpak_dir_deploy()
         for d in "${app_dir}/${ARCH}/${BRANCH}"/.*-*/files/extra; do
+            [ -d "$d" ] || continue
             assert_file_has_mode "$d" 700
 
             # All files for which it was feasible had their permissions reset

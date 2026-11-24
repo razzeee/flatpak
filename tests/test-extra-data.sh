@@ -99,6 +99,7 @@ ok "install extra data app with oci"
 build_extra_data_noruntime_app() {
     local repo="$1"
     local branch="$2"
+    local output_mode="${3:-}"
 
     DIR="$(mktemp -d)"
     ARCH="$(flatpak --default-arch)"
@@ -107,6 +108,9 @@ build_extra_data_noruntime_app() {
 
     cp "${G_TEST_BUILDDIR}/apply-extra-static" "${DIR}/files/bin/apply_extra"
     chmod +x "${DIR}/files/bin/apply_extra"
+    if [ "${output_mode}" = setid-output ]; then
+        touch "${DIR}/files/setid-output"
+    fi
 
     cat > "${DIR}/metadata" <<EOF
 [Application]
@@ -138,8 +142,7 @@ if test -f "${G_TEST_BUILDDIR}/apply-extra-static"; then
     # Permissions of non-executable files are normalized to 0644
     assert_file_has_mode "${DEPLOY_DIR}/files/extra/ran" 644
 
-    # A setuid and/or setgid executable file is normalized to 0755 to avoid
-    # becoming a privilege escalation vector
+    # Permissions of executable files are normalized to 0755
     assert_file_has_mode "${DEPLOY_DIR}/files/extra/exe" 755
 
     # There must not be any setuid or setgid files in the deploy dir
@@ -150,6 +153,14 @@ if test -f "${G_TEST_BUILDDIR}/apply-extra-static"; then
 
     ${FLATPAK} ${U} uninstall -y org.test.ExtraDataNoRuntime >&2
     ok "install+run extra data app with NoRuntime"
+
+    build_extra_data_noruntime_app repos/test ${BRANCH} setid-output
+    update_repo ${REPONAME} ${COLLECTION_ID}
+    if ${FLATPAK} ${U} install -y ${REPONAME}-repo org.test.ExtraDataNoRuntime ${BRANCH} >out 2>&1; then
+        assert_not_reached "installed an extra data app with setid output"
+    fi
+    assert_file_has_content out "apply_extra produced a setuid or setgid file"
+    ok "refuse extra data app with setid output"
 else
     ok "# SKIP install+run extra data app with NoRuntime apply-extra-static not found"
 fi

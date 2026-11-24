@@ -1314,6 +1314,7 @@ _flatpak_canonicalize_permissions (int         parent_dfd,
                                    gboolean    toplevel,
                                    int         uid,
                                    int         gid,
+                                   gboolean   *found_setid,
                                    GError    **error)
 {
   struct stat stbuf;
@@ -1328,6 +1329,10 @@ _flatpak_canonicalize_permissions (int         parent_dfd,
       glnx_set_error_from_errno (error);
       return FALSE;
     }
+
+  /* Changing ownership can clear these bits. */
+  if (found_setid != NULL && S_ISREG (stbuf.st_mode) && (stbuf.st_mode & (S_ISUID | S_ISGID)))
+    *found_setid = TRUE;
 
   if ((uid != -1 && uid != stbuf.st_uid) || (gid != -1 && gid != stbuf.st_gid))
     {
@@ -1379,7 +1384,8 @@ _flatpak_canonicalize_permissions (int         parent_dfd,
                   break;
                 }
 
-              if (!_flatpak_canonicalize_permissions (dfd_iter.fd, dent->d_name, FALSE, uid, gid, error))
+              if (!_flatpak_canonicalize_permissions (dfd_iter.fd, dent->d_name, FALSE,
+                                                      uid, gid, found_setid, error))
                 {
                   error = NULL;
                   res = FALSE;
@@ -1399,6 +1405,7 @@ _flatpak_canonicalize_permissions (int         parent_dfd,
        * other users access those. */
       if (toplevel &&
           res &&
+          !(found_setid != NULL && *found_setid) &&
           fchmodat (parent_dfd, rel_path, 0755, 0) != 0)
         {
           glnx_set_error_from_errno (error);
@@ -1447,9 +1454,27 @@ flatpak_canonicalize_permissions (int         parent_dfd,
                                   const char *rel_path,
                                   int         uid,
                                   int         gid,
+                                  FlatpakSetidPolicy setid_policy,
                                   GError    **error)
 {
-  return _flatpak_canonicalize_permissions (parent_dfd, rel_path, TRUE, uid, gid, error);
+  gboolean found_setid = FALSE;
+  gboolean res = _flatpak_canonicalize_permissions (parent_dfd, rel_path, TRUE, uid, gid,
+                                                    setid_policy == FLATPAK_SETID_REJECT ? &found_setid : NULL,
+                                                    error);
+
+  if (found_setid)
+    {
+      const char *message = _("apply_extra produced a setuid or setgid file");
+
+      if (!res)
+        g_prefix_error (error, "%s: ", message);
+      else
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, message);
+
+      return FALSE;
+    }
+
+  return res;
 }
 
 /* Make a directory, and its parent. Don't error if it already exists.
